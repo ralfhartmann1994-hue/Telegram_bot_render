@@ -54,7 +54,9 @@ def yes_no_menu() -> ReplyKeyboardMarkup:
 def cmd_start(m: Message):
     uid = m.from_user.id
     ensure_user(uid)
-    u = users[uid]
+    if uid not in users:
+    users[uid] = {"state": "new"}  # أو أي بيانات افتراضية تحتاجها
+u = users[uid]
     if u.get("banned_full"):
         delayed_send(bot, uid, BANNED, delay=0.4)
         return
