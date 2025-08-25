@@ -11,7 +11,7 @@ from Matchmaking import add_to_wait, try_match, start_timeout_watcher, remove_fr
 from messages import (WELCOME, HELP, SEARCHING, INTRO_PARTNER, NO_MATCH,
                       LEAVE_CONFIRM, LEAVE_TOO_SOON, LEFT_YOU, LEFT_PARTNER,
                       REPORT_CONFIRM, REPORT_OK, REPORT_RESULT, MUTED, BANNED, delayed_send)
-from Bad_word import is_bad_word
+from Bad_word import count_bad_words
 
 if not TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN مفقود. أضفه في Render → Environment.")
