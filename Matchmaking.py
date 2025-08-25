@@ -3,7 +3,7 @@ import time, threading
 from typing import Dict, List
 from config import SEARCH_TIMEOUT, TARGET_GENDERS
 from storage import users, save_users
-from messages import NO_MATCH, delayed_send
+from Messages import NO_MATCH, delayed_send
 
 # waiting[topic] = list of dicts: {uid, target_gender, since}
 waiting: Dict[str, List[dict]] = {}
