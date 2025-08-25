@@ -216,5 +216,8 @@ def relay_messages(message):
     bot.send_message(partner_id, f"{users[user_id]['name']} 💬: {message.text}")
 
 # ===== تشغيل البوت =====
-print("🤖 Bot is running...")
-bot.infinity_polling()
+try:
+    print("🤖 Bot is running...")
+    bot.infinity_polling(skip_pending=True)
+except Exception as e:
+    print(f"❌ Bot stopped due to: {e}") 
