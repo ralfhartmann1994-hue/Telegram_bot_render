@@ -3,7 +3,7 @@ import time
 from typing import Tuple
 from config import PENALTY_PER_HIT, WARN_THRESHOLD, BAN_THRESHOLD, PARTIAL_BAN_DAYS
 from storage import users, save_users
-from bad_words import count_bad_words
+from bad_word import count_bad_words
 
 def is_muted(u) -> Tuple[bool, int | None]:
     mu = u.get("mute_until")
