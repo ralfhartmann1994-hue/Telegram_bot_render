@@ -3,8 +3,8 @@ import time
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, Message
 
-from Config import TOKEN, ADMIN_CHAT_ID, TOPICS, GENDERS, TARGET_GENDERS, LEAVE_DELAY
-from Storage import load_users, save_users, ensure_user, users
+from config import TOKEN, ADMIN_CHAT_ID, TOPICS, GENDERS, TARGET_GENDERS, LEAVE_DELAY
+from storage import load_users, save_users, ensure_user, users
 from Profile_manger import sanitize_name, sanitize_age, profile_text, append_history, end_session, start_history
 from Moderation import is_muted, apply_respect, review_history_and_penalize
 from Matchmaking import add_to_wait, try_match, start_timeout_watcher, remove_from_wait
