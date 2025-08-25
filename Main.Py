@@ -1,250 +1,220 @@
 import os
 import time
 import telebot
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 # ===== الإعدادات =====
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TOKEN = os.environ.get("TELEGRAM_TOKEN")  # ضع التوكن في متغير بيئة داخل Render
 if not TOKEN:
-    raise RuntimeError("ضع TELEGRAM_TOKEN في إعدادات البيئة")
+    raise RuntimeError("ضع TELEGRAM_TOKEN في إعدادات البيئة على Render")
 
 bot = telebot.TeleBot(TOKEN)
 
-# ===== التخزين في الذاكرة =====
-users = {}  # user_id -> {"name":.., "age":.., "gender":.., "respect":.., "gender_changes":0, "profile_locked":False}
-waiting_users = { (topic, gender): [] for topic in ["فلسفة","رياضة","دين","سياسة","تعارف"] for gender in ["ذكر","أنثى"] }
-active_chats = {}  # user_id -> partner_id
-chat_logs = {}  # user_id -> [last 50 messages]
-leave_timers = {}  # user_id -> وقت بدء المحادثة
-warnings_sent = set()
-banned_users = {}  # user_id -> ban_end_timestamp
+# ===== التخزين المؤقت في الذاكرة =====
+users = {}  # تخزين بيانات المستخدمين
+chats = {}  # إدارة المحادثات الجارية
+reports = []  # بلاغات المستخدمين
 
-# ===== قائمة الكلمات البذيئة =====
-bad_words = [
-    "كس","كسمك","كسي","كسس","كسسس","كسسسس","كسمو","كصمك","اير","ايري","ايرنا","طيزنا","طيز",
-    "كسختك","يلعن ربك","يلعن دينك","يلعن روحك","عنربك","عندينك","يلعن شفراتك","قحبة","شرموطة",
-    "شلكة","منتاكة","سرموطة","قحب","شرموط","منيك","مكسكس"
-]
+# ===== قائمة الكلمات الممنوعة =====
+bad_words = ["fuck", "shit", "bitch", "asshole", "dick", "pussy", "motherfucker",
+             "لعنة", "زق", "قحبة", "كس", "نيك", "شرموط", "كلب", "حمار"]
 
-# ===== دوال مساعدة =====
-def get_penalty(respect, bad_count):
-    penalty = 0
-    if respect >= 76:
-        penalty = bad_count // 2
-    elif 71 <= respect <= 75:
-        penalty = bad_count
-    elif 61 <= respect <= 70:
-        penalty = bad_count * 2
-    elif 51 <= respect <= 60:
-        penalty = bad_count * 3
-    elif 41 <= respect <= 50:
-        penalty = bad_count * 5
-    elif 26 <= respect <= 40:
-        penalty = bad_count * 10
-    return penalty
+# ===== هيكل بيانات المستخدم =====
+def create_user(user_id):
+    return {
+        "name": None,
+        "age": None,
+        "gender": None,   # لا يتغير بعد التسجيل
+        "topic": None,
+        "respect": 80,
+        "warnings": 0,
+        "banned_until": None,
+        "chat_partner": None,
+        "messages": []
+    }
 
-def is_banned(user_id):
-    if user_id in banned_users:
-        if time.time() < banned_users[user_id]:
-            return True
-        else:
-            del banned_users[user_id]
-    return False
-
-def add_message(user_id, text):
-    if user_id not in chat_logs:
-        chat_logs[user_id] = []
-    chat_logs[user_id].append(text)
-    if len(chat_logs[user_id]) > 50:
-        chat_logs[user_id] = chat_logs[user_id][-50:]
-
-# ===== لوحة الأزرار الرئيسية =====
-def main_menu():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("🏠 الرئيسية"), KeyboardButton("👤 الملف الشخصي"), KeyboardButton("🔍 البحث"))
-    return kb
-
-# ===== البداية =====
-@bot.message_handler(commands=['start'])
-def start(msg):
-    user_id = msg.from_user.id
+# ===== أوامر البداية =====
+@bot.message_handler(commands=["start"])
+def start(message):
+    user_id = message.from_user.id
     if user_id not in users:
-        users[user_id] = {"name": None, "age": None, "gender": None, "respect": 80, "gender_changes": 0, "profile_locked": False}
-        bot.send_message(user_id, "👋 أهلاً! لنبدأ بإنشاء ملفك الشخصي.\nما اسمك؟", reply_markup=main_menu())
+        users[user_id] = create_user(user_id)
+        bot.send_message(user_id,
+                         "👋 أهلاً بك في بوت الدردشة الذكي!\n\n"
+                         "سيتم إنشاء ملفك الشخصي أولاً.\n"
+                         "ما هو اسمك؟")
+        bot.register_next_step_handler(message, set_name)
     else:
-        bot.send_message(user_id, "مرحباً بعودتك!", reply_markup=main_menu())
+        bot.send_message(user_id, "أهلاً بك مجدداً! ✅\nاستخدم /menu لعرض الخيارات.")
 
-# ===== الملف الشخصي =====
-@bot.message_handler(func=lambda m: m.text == "👤 الملف الشخصي")
-def profile_menu(msg):
-    user = users.get(msg.from_user.id)
-    if not user: return
-    info = f"👤 الاسم: {user['name']}\n🎂 العمر: {user['age']}\n⚧️ الجنس: {user['gender']}\n⭐ الاحترام: {user['respect']}"
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("✏️ تعديل الاسم", "✏️ تعديل العمر", "✏️ تعديل الجنس")
-    kb.add("⬅️ رجوع")
-    bot.send_message(msg.chat.id, info, reply_markup=kb)
+# ===== تسجيل المستخدم =====
+def set_name(message):
+    user_id = message.from_user.id
+    name = message.text.strip()
+    if not name or len(name) < 2:
+        bot.send_message(user_id, "⚠️ الاسم قصير جداً، أعد المحاولة:")
+        return bot.register_next_step_handler(message, set_name)
+    users[user_id]["name"] = name
+    bot.send_message(user_id, "📅 ممتاز! الآن أدخل عمرك:")
+    bot.register_next_step_handler(message, set_age)
 
-# ===== تعديل البيانات =====
-@bot.message_handler(func=lambda m: m.text in ["✏️ تعديل الاسم", "✏️ تعديل العمر", "✏️ تعديل الجنس"])
-def edit_profile(msg):
-    user_id = msg.from_user.id
-    if msg.text == "✏️ تعديل الاسم":
-        bot.send_message(user_id, "اكتب الاسم الجديد:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True))
-    elif msg.text == "✏️ تعديل العمر":
-        bot.send_message(user_id, "اكتب العمر الجديد كرقم:", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True))
-    elif msg.text == "✏️ تعديل الجنس":
-        if users[user_id]["gender_changes"] >= 1:
-            bot.send_message(user_id, "🚫 لا يمكنك تغيير الجنس أكثر من مرة.")
+def set_age(message):
+    user_id = message.from_user.id
+    try:
+        age = int(message.text.strip())
+        if age < 10 or age > 100:
+            raise ValueError
+        users[user_id]["age"] = age
+        # الجنس يُطلب مرة واحدة فقط
+        markup = ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+        markup.add("👨 ذكر", "👩 أنثى")
+        bot.send_message(user_id, "👤 اختر جنسك (لا يمكن تغييره لاحقاً):", reply_markup=markup)
+        bot.register_next_step_handler(message, set_gender)
+    except ValueError:
+        bot.send_message(user_id, "⚠️ أدخل عمرك كعدد صحيح (10-100):")
+        bot.register_next_step_handler(message, set_age)
+
+def set_gender(message):
+    user_id = message.from_user.id
+    gender = message.text.strip()
+    if gender not in ["👨 ذكر", "👩 أنثى"]:
+        bot.send_message(user_id, "⚠️ اختر من الأزرار فقط:")
+        return bot.register_next_step_handler(message, set_gender)
+    users[user_id]["gender"] = gender
+    # اختيار الفئة
+    markup = ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+    markup.add("💭 فلسفة", "🙏 دين", "🏛️ سياسة", "🤝 تعارف", "⚽ رياضة")
+    bot.send_message(user_id, "اختر فئة النقاش التي تفضلها:", reply_markup=markup)
+    bot.register_next_step_handler(message, set_topic)
+
+def set_topic(message):
+    user_id = message.from_user.id
+    topic = message.text.strip()
+    if topic not in ["💭 فلسفة", "🙏 دين", "🏛️ سياسة", "🤝 تعارف", "⚽ رياضة"]:
+        bot.send_message(user_id, "⚠️ اختر من الأزرار فقط:")
+        return bot.register_next_step_handler(message, set_topic)
+    users[user_id]["topic"] = topic
+    bot.send_message(user_id, "✅ تم إنشاء ملفك الشخصي بنجاح!\n"
+                              "استخدم /menu لعرض الخيارات.", reply_markup=ReplyKeyboardRemove())
+
+# ===== القائمة الرئيسية =====
+@bot.message_handler(commands=["menu"])
+def menu(message):
+    user_id = message.from_user.id
+    if user_id not in users or not users[user_id]["topic"]:
+        return bot.send_message(user_id, "⚠️ يجب إكمال التسجيل أولاً عبر /start")
+
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("👤 عرض ملفي", "✏️ تعديل الاسم/العمر")
+    markup.add("🔎 البحث عن دردشة")
+    bot.send_message(user_id, "📌 القائمة الرئيسية:", reply_markup=markup)
+
+# ===== عرض الملف الشخصي =====
+@bot.message_handler(func=lambda m: m.text == "👤 عرض ملفي")
+def show_profile(message):
+    user_id = message.from_user.id
+    u = users[user_id]
+    bot.send_message(user_id,
+                     f"👤 الاسم: {u['name']}\n"
+                     f"📅 العمر: {u['age']}\n"
+                     f"{u['gender']}\n"
+                     f"🎯 الفئة: {u['topic']}\n"
+                     f"💯 درجة الاحترام: {u['respect']}")
+
+# ===== تعديل الاسم والعمر =====
+@bot.message_handler(func=lambda m: m.text == "✏️ تعديل الاسم/العمر")
+def edit_profile(message):
+    markup = ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+    markup.add("✏️ تعديل الاسم", "✏️ تعديل العمر")
+    bot.send_message(message.chat.id, "ماذا تريد تعديل؟", reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.text == "✏️ تعديل الاسم")
+def edit_name(message):
+    user_id = message.from_user.id
+    bot.send_message(user_id, "أدخل اسمك الجديد:")
+    bot.register_next_step_handler(message, save_new_name)
+
+def save_new_name(message):
+    user_id = message.from_user.id
+    name = message.text.strip()
+    if not name or len(name) < 2:
+        bot.send_message(user_id, "⚠️ الاسم غير صالح.")
+        return
+    users[user_id]["name"] = name
+    bot.send_message(user_id, "✅ تم تعديل الاسم بنجاح.")
+
+@bot.message_handler(func=lambda m: m.text == "✏️ تعديل العمر")
+def edit_age(message):
+    user_id = message.from_user.id
+    bot.send_message(user_id, "أدخل عمرك الجديد:")
+    bot.register_next_step_handler(message, save_new_age)
+
+def save_new_age(message):
+    user_id = message.from_user.id
+    try:
+        age = int(message.text.strip())
+        if age < 10 or age > 100:
+            raise ValueError
+        users[user_id]["age"] = age
+        bot.send_message(user_id, "✅ تم تعديل العمر بنجاح.")
+    except ValueError:
+        bot.send_message(user_id, "⚠️ العمر غير صالح.")
+
+# ===== البحث عن دردشة (المطابقة) =====
+@bot.message_handler(func=lambda m: m.text == "🔎 البحث عن دردشة")
+def search_chat(message):
+    user_id = message.from_user.id
+    topic = users[user_id]["topic"]
+    for uid, u in users.items():
+        if uid != user_id and u["topic"] == topic and u["chat_partner"] is None:
+            # مطابقة
+            users[user_id]["chat_partner"] = uid
+            users[uid]["chat_partner"] = user_id
+            chats[(user_id, uid)] = []
+            intro1 = (f"🎉 تم العثور على شريك دردشة!\n"
+                      f"👤 {u['name']} ({u['age']} سنة)\n{u['gender']}\n"
+                      f"💯 احترامه: {u['respect']}")
+            intro2 = (f"🎉 تم العثور على شريك دردشة!\n"
+                      f"👤 {users[user_id]['name']} ({users[user_id]['age']} سنة)\n"
+                      f"{users[user_id]['gender']}\n"
+                      f"💯 احترامه: {users[user_id]['respect']}")
+            leave_btn = ReplyKeyboardMarkup(resize_keyboard=True)
+            leave_btn.add("🚨 إبلاغ", "🚪 مغادرة")
+            bot.send_message(user_id, intro1, reply_markup=leave_btn)
+            bot.send_message(uid, intro2, reply_markup=leave_btn)
             return
-        kb = ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.add("👨 ذكر", "👩 أنثى")
-        bot.send_message(user_id, "اختر الجنس الجديد:", reply_markup=kb)
+    bot.send_message(user_id, "⌛ لا يوجد شريك متاح الآن، حاول لاحقاً.")
 
-# ===== البحث =====
-TOPICS = ["📚 فلسفة","⚽ رياضة","☪️ دين","🏛 سياسة","🤝 تعارف"]
-
-@bot.message_handler(func=lambda m: m.text == "🔍 البحث")
-def search_menu(msg):
-    user_id = msg.from_user.id
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    for t in TOPICS:
-        kb.add(t)
-    kb.add("⬅️ رجوع")
-    bot.send_message(user_id, "ماذا تريد أن تناقش اليوم؟ اختر مجال النقاش:", reply_markup=kb)
-
-# ===== اختيار الجنس للمطابقة =====
-@bot.message_handler(func=lambda m: m.text in TOPICS)
-def topic_choice(msg):
-    topic = msg.text
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(f"{topic} 👨", f"{topic} 👩")
-    kb.add("⬅️ رجوع")
-    bot.send_message(msg.chat.id, "اختر مع من تريد التحدث:", reply_markup=kb)
-
-# ===== الإبلاغ =====
-def check_respect_and_ban(user_id):
-    respect = users[user_id]["respect"]
-    if respect <= 25:
-        banned_users[user_id] = float('inf')  # حظر دائم
-        bot.send_message(user_id, "⛔ تم حظرك نهائياً من البوت بسبب انخفاض الاحترام تحت الحد المسموح.")
-        return True
-    elif respect <= 40:
-        if user_id not in warnings_sent:
-            banned_users[user_id] = time.time() + 7*24*3600  # أسبوع حظر مؤقت
-            bot.send_message(user_id,
-                "⚠️ تحذير شديد! احترامك وصل 40.\n"
-                "لقد تم حظرك لمدة أسبوع بسبب سلوك غير لائق.\n"
-                "تعلم من هذه التجربة وكن أكثر أخلاقًا عند استخدام البوت.\n"
-                "إذا استمر السلوك السلبي، سيتم الحظر النهائي عند 25 نقطة.")
-            warnings_sent.add(user_id)
-            return True
-    elif respect <= 50:
-        if user_id not in warnings_sent:
-            bot.send_message(user_id,
-                "⚠️ تحذير! احترامك وصل 50.\n"
-                "يجب أن تكون أكثر تهذيبًا عند الحديث.\n"
-                "كل سلوك سيء إضافي سيخصم نقاط أكثر وقد يؤدي إلى الحظر المؤقت أو النهائي.\n"
-                "نصائح: استخدم لغة محترمة، لا تسب أو تهين، وحافظ على مستوى النقاش راقيًا.")
-            warnings_sent.add(user_id)
-    return False
-
-@bot.message_handler(func=lambda m: m.text == "🚨 إبلاغ")
-def report_user(msg):
-    user_id = msg.from_user.id
-    if user_id not in active_chats:
-        bot.send_message(user_id, "❌ لا يمكنك الإبلاغ بدون وجود دردشة.")
+# ===== إدارة الرسائل بين الشركاء =====
+@bot.message_handler(func=lambda m: True)
+def relay_messages(message):
+    user_id = message.from_user.id
+    if user_id not in users or not users[user_id]["chat_partner"]:
         return
-    partner_id = active_chats[user_id]
-    messages = chat_logs.get(partner_id, [])
-    bad_count = sum(1 for m in messages for w in bad_words if w in m)
-    penalty = get_penalty(users[partner_id]["respect"], bad_count)
-    users[partner_id]["respect"] -= penalty
-    bot.send_message(user_id, f"✅ تم الإبلاغ. عدد الكلمات البذيئة: {bad_count}\nالخصم: {penalty} نقاط.")
-    bot.send_message(partner_id, "🚨 لقد تم الإبلاغ عنك! انتبه إلى سلوكك.")
-    check_respect_and_ban(partner_id)
 
-# ===== المطابقة =====
-def start_chat(user_id, partner_id):
-    active_chats[user_id] = partner_id
-    active_chats[partner_id] = user_id
-    leave_timers[user_id] = time.time()
-    leave_timers[partner_id] = time.time()
-    bot.send_message(user_id, "✅ تم بدء المحادثة! يمكنك التحدث الآن.")
-    bot.send_message(partner_id, "✅ تم بدء المحادثة! يمكنك التحدث الآن.")
+    partner_id = users[user_id]["chat_partner"]
 
-@bot.message_handler(func=lambda msg: any(t in msg.text for t in TOPICS))
-def handle_topic_gender_choice(msg):
-    user_id = msg.chat.id
-    text = msg.text
-    topic = None
-    gender_pref = "ذكر" if "👨" in text else "أنثى"
-    for t in ["فلسفة","رياضة","دين","سياسة","تعارف"]:
-        if t in text:
-            topic = t
-            break
-    if topic is None: return
-    opposite_gender = "أنثى" if users[user_id]["gender"] == "ذكر" else "ذكر"
-    key = (topic, opposite_gender)
-    if waiting_users[key]:
-        partner_id = waiting_users[key].pop(0)
-        start_chat(user_id, partner_id)
-        bot.send_message(user_id, f"🎉 تم إيجاد شريك!\n👤 الاسم: {users[partner_id]['name']}\n🎂 العمر: {users[partner_id]['age']}\n⭐ الاحترام: {users[partner_id]['respect']}")
-        bot.send_message(partner_id, f"🎉 تم إيجاد شريك!\n👤 الاسم: {users[user_id]['name']}\n🎂 العمر: {users[user_id]['age']}\n⭐ الاحترام: {users[user_id]['respect']}")
-    else:
-        waiting_users[(topic, users[user_id]["gender"])].append(user_id)
-        bot.send_message(user_id, "⏳ لم يتم العثور على شريك حالياً، سيتم مطابقتك عند توفر شخص مناسب.")
+    # تحقق الكلمات البذيئة
+    lower_msg = message.text.lower()
+    if any(bad in lower_msg for bad in bad_words):
+        users[user_id]["warnings"] += 1
+        users[user_id]["respect"] -= 5 + users[user_id]["warnings"]
+        if users[user_id]["respect"] <= 25:
+            bot.send_message(user_id, "⛔ تم حظرك نهائياً بسبب تكرار الألفاظ البذيئة.")
+            users[user_id]["chat_partner"] = None
+            users[partner_id]["chat_partner"] = None
+            return
+        elif users[user_id]["respect"] <= 40:
+            users[user_id]["banned_until"] = time.time() + 7 * 24 * 3600
+            bot.send_message(user_id, "⏳ تم حظرك جزئياً لمدة أسبوع.")
+            return
 
-# ===== إعادة توجيه الرسائل بين الشريكين =====
-@bot.message_handler(func=lambda msg: True)
-def relay(msg):
-    user_id = msg.chat.id
-    text = msg.text
-    if is_banned(user_id):
-        bot.send_message(user_id, "⛔ أنت محظور من استخدام البوت حالياً.")
-        return
-    add_message(user_id, text)
+    # حفظ الرسائل (آخر 50 فقط)
+    chats[(user_id, partner_id)] = chats.get((user_id, partner_id), [])[-49:] + [message.text]
 
-    # خصم نقاط الكلمات البذيئة تلقائياً أثناء الحديث
-    bad_count = sum(1 for w in bad_words if w in text)
-    if bad_count > 0:
-        users[user_id]["respect"] -= get_penalty(users[user_id]["respect"], bad_count)
-        check_respect_and_ban(user_id)
+    # إعادة إرسال الرسالة للطرف الآخر
+    bot.send_message(partner_id, f"{users[user_id]['name']} 💬: {message.text}")
 
-    if user_id in active_chats:
-        partner_id = active_chats[user_id]
-        sender_name = users[user_id]["name"] or "مستخدم"
-        bot.send_message(partner_id, f"💬 {sender_name}: {text}")
-    else:
-        bot.send_message(user_id, "ℹ️ لا يوجد شريك نشط، اضغط 🔍 البحث للعثور على شريك.")
-
-# ===== زر المغادرة بعد 30 ثانية =====
-@bot.message_handler(func=lambda msg: msg.text == "❌ مغادرة 🚪")
-def leave_chat(msg):
-    user_id = msg.chat.id
-    if user_id not in active_chats:
-        bot.send_message(user_id, "ℹ️ أنت لست في محادثة حالياً.")
-        return
-    elapsed = time.time() - leave_timers.get(user_id, 0)
-    if elapsed < 30:
-        bot.send_message(user_id, f"⏳ لا يمكنك المغادرة قبل 30 ثانية. تبقى {int(30 - elapsed)} ثانية.")
-        return
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("تأكيد المغادرة 🚪", callback_data=f"confirm_leave_{user_id}"))
-    bot.send_message(user_id, "هل تريد فعلاً المغادرة؟", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_leave_"))
-def confirm_leave(call):
-    user_id = int(call.data.split("_")[-1])
-    if user_id not in active_chats:
-        bot.answer_callback_query(call.id, "ℹ️ لا يوجد شريك للدردشة.")
-        return
-    partner_id = active_chats[user_id]
-    bot.send_message(user_id, "🚪 غادرت الدردشة.")
-    bot.send_message(partner_id, "🚪 شريكك غادر الدردشة.")
-    for uid in [user_id, partner_id]:
-        active_chats.pop(uid, None)
-        leave_timers.pop(uid, None)
-
-print("🤖 البوت يعمل...")
-bot.infinity_polling(skip_pending=True)
+# ===== تشغيل البوت =====
+print("🤖 Bot is running...")
+bot.infinity_polling()
