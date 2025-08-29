@@ -1,9 +1,11 @@
 # main.py
+import os
 import time
 import telebot
+from flask import Flask, request
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, Message
 
-from config import TOKEN, ADMIN_CHAT_ID, TOPICS, GENDERS, TARGET_GENDERS, LEAVE_DELAY
+from config import TOKEN, ADMIN_CHAT_ID, TOPICS, GENDERS, TARGET_GENDERS, LEAVE_DELAY, WEBHOOK_PATH
 from storage import load_users, save_users, ensure_user, users
 from Profile_manger import sanitize_name, sanitize_age, profile_text, append_history, end_session, start_history
 from Moderation import is_muted, apply_respect, review_history_and_penalize
@@ -17,6 +19,7 @@ if not TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN مفقود. أضفه في Render → Environment.")
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
+app = Flask(__name__)
 
 # ============ القوائم ============
 def main_menu(in_chat: bool = False) -> ReplyKeyboardMarkup:
@@ -49,14 +52,14 @@ def yes_no_menu() -> ReplyKeyboardMarkup:
     kb.add(KeyboardButton("نعم ✅"), KeyboardButton("لا ❌"))
     return kb
 
-# ============ حالات ============
+# ============ أوامر البوت ============
 @bot.message_handler(commands=["start"])
 def cmd_start(m: Message):
     uid = m.from_user.id
     ensure_user(uid)
 
     if uid not in users:
-        users[uid] = {"state": "new"}  # أو أي بيانات افتراضية تحتاجها
+        users[uid] = {"state": "new"}
 
     u = users[uid]
 
@@ -340,18 +343,30 @@ def start_chat(u1_id: int, u2_id: int):
     except Exception as e:
         print(f"[INTRO] {e}")
 
+# ============ Webhook + Flask ============
+@app.route(f"/{WEBHOOK_PATH}", methods=["POST"])
+def webhook():
+    json_str = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "", 200
+
+def set_webhook():
+    url = os.environ.get("WEBHOOK_URL")
+    if not url:
+        raise RuntimeError("WEBHOOK_URL مفقود. أضفه في Render → Environment.")
+    full_url = f"{url}/{WEBHOOK_PATH}"
+    bot.remove_webhook()
+    bot.set_webhook(full_url)
+    print(f"[WEBHOOK] Set to {full_url}")
+
 # ============ التشغيل ============
-def main():
+if __name__ == "__main__":
     print("[BOOT] Loading users...")
     load_users()
     print(f"[BOOT] Users: {len(users)}")
-    try:
-        bot.remove_webhook()
-    except Exception as e:
-        print(f"[WEBHOOK] {e}")
+    set_webhook()
     start_timeout_watcher(bot)
-    print("[RUN] polling…")
-    bot.infinity_polling(skip_pending=True, timeout=20)
-
-if __name__ == "__main__":
-    main()
+    port = int(os.environ.get("PORT", 5000))
+    print(f"[RUN] Webhook listening on port {port}…")
+    app.run(host="0.0.0.0", port=port)
