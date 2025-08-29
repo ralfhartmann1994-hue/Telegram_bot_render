@@ -54,9 +54,12 @@ def yes_no_menu() -> ReplyKeyboardMarkup:
 def cmd_start(m: Message):
     uid = m.from_user.id
     ensure_user(uid)
+
     if uid not in users:
-    users[uid] = {"state": "new"}  # أو أي بيانات افتراضية تحتاجها
-u = users[uid]
+        users[uid] = {"state": "new"}  # أو أي بيانات افتراضية تحتاجها
+
+    u = users[uid]
+
     if u.get("banned_full"):
         delayed_send(bot, uid, BANNED, delay=0.4)
         return
@@ -72,7 +75,8 @@ u = users[uid]
 
     u["state"] = None
     save_users()
-    delayed_send(bot, uid, "مرحبًا من جديد! اختر من القائمة:", delay=0.4, reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+    delayed_send(bot, uid, "مرحبًا من جديد! اختر من القائمة:", delay=0.4,
+                 reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
 @bot.message_handler(commands=["help"])
 def cmd_help(m: Message):
@@ -81,13 +85,15 @@ def cmd_help(m: Message):
     u = users[uid]
     if u.get("banned_full"):
         return
-    delayed_send(bot, uid, HELP, delay=0.2, reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+    delayed_send(bot, uid, HELP, delay=0.2,
+                 reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
 @bot.message_handler(commands=["profile"])
 def cmd_profile(m: Message):
     uid = m.from_user.id
     ensure_user(uid)
-    delayed_send(bot, uid, profile_text(users[uid]), delay=0.2, reply_markup=main_menu(in_chat=bool(users[uid].get("partner"))))
+    delayed_send(bot, uid, profile_text(users[uid]), delay=0.2,
+                 reply_markup=main_menu(in_chat=bool(users[uid].get("partner"))))
 
 # ============ الإدخال النصي العام ============
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
@@ -181,7 +187,6 @@ def on_text(m: Message):
         return
 
     if txt == "🔍 البحث عن دردشة":
-        # تحقق اكتمال الملف
         if not (u.get("gender") and u.get("name") and u.get("age")):
             delayed_send(bot, uid, "⚠️ أكمل التسجيل أولًا عبر /start.", delay=0.3)
             return
@@ -207,10 +212,8 @@ def on_text(m: Message):
         u["search_pref"] = "أي" if txt == "أي" else txt
         u["state"] = None
         save_users()
-        # أضِف لقائمة الانتظار وحاول المطابقة فورًا
         add_to_wait(u["topic"], uid, u["search_pref"])
         delayed_send(bot, uid, SEARCHING, delay=0.5, reply_markup=main_menu(in_chat=False))
-        # جرّب مطابقة فورية
         partner_id = try_match(uid, u["topic"])
         if partner_id:
             start_chat(uid, partner_id)
@@ -218,15 +221,12 @@ def on_text(m: Message):
 
     # —— داخل محادثة —— 
     if u.get("partner"):
-        # حظر جزئي؟
         muted, left = is_muted(u)
         if muted:
             delayed_send(bot, uid, MUTED.format(left=left), delay=0.2)
             return
 
-        # أزرار الدردشة
         if txt == "🚪 مغادرة الدردشة":
-            # لا تُمرر للطرف الآخر — فقط تأكيد عندك
             started = u.get("chat_started_at") or 0
             elapsed = time.time() - started
             if elapsed < LEAVE_DELAY:
@@ -239,12 +239,10 @@ def on_text(m: Message):
 
         if u.get("state") == "CONFIRM_LEAVE":
             if txt == "نعم ✅":
-                # أنهِ الجلسة
                 pid = u.get("partner")
                 p = users.get(pid)
                 end_session(u, p)
                 delayed_send(bot, uid, LEFT_YOU, delay=0.2, reply_markup=main_menu(in_chat=False))
-                # أبلغ الطرف الآخر فقط بانتهاء الدردشة (بدون تفاصيل أزرار)
                 if pid:
                     try:
                         delayed_send(bot, pid, LEFT_PARTNER, delay=0.2, reply_markup=main_menu(in_chat=False))
@@ -263,7 +261,6 @@ def on_text(m: Message):
                 return
 
         if txt == "🚨 إبلاغ":
-            # تأكيد عند المبلّغ فقط
             u["state"] = "CONFIRM_REPORT"
             save_users()
             delayed_send(bot, uid, REPORT_CONFIRM, delay=0.2, reply_markup=yes_no_menu())
@@ -280,7 +277,6 @@ def on_text(m: Message):
                     lines=f"• {you_line}\n• {other_line}",
                     respect=users[uid].get("respect", 80)
                 ), delay=0.3)
-                # إخطار الأدمن (اختياري)
                 if ADMIN_CHAT_ID:
                     try:
                         bot.send_message(int(ADMIN_CHAT_ID), f"🚨 بلاغ من {uid} ضد {pid}\n{you_line}\n{other_line}")
@@ -298,11 +294,9 @@ def on_text(m: Message):
                 delayed_send(bot, uid, "اختر: نعم ✅ / لا ❌", delay=0.2, reply_markup=yes_no_menu())
                 return
 
-        # تطبيق الاحترام على الرسالة (لا تُظهر الاسم — فقط تمرير النص)
         warn = apply_respect(uid, txt)
         if warn:
             delayed_send(bot, uid, warn, delay=0.1)
-            # في حال صار حظر كامل، أنهِ الجلسة
             if users[uid].get("banned_full"):
                 pid = u.get("partner")
                 p = users.get(pid)
@@ -313,11 +307,9 @@ def on_text(m: Message):
                     print(f"[BAN NOTIFY] {e}")
                 return
 
-        # مرّر الرسالة للطرف الآخر فقط كنص
         pid = u.get("partner")
         p = users.get(pid)
         if not p:
-            # شريك مفقود — رجوع للقائمة
             end_session(u, None)
             delayed_send(bot, uid, LEFT_PARTNER, delay=0.2, reply_markup=main_menu(in_chat=False))
             return
@@ -329,21 +321,19 @@ def on_text(m: Message):
             print(f"[RELAY] {e}")
         return
 
-    # —— خارج محادثة وأوامر غير مفهومة —— 
     delayed_send(bot, uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", delay=0.2, reply_markup=main_menu(in_chat=False))
 
 # ============ بدء محادثة/إنهاؤها ============
 def start_chat(u1_id: int, u2_id: int):
-    u1 = users[u1_id]; u2 = users[u2_id]
+    u1 = users[u1_id]
+    u2 = users[u2_id]
     u1["partner"] = u2_id
     u2["partner"] = u1_id
-    start_history(u1)  # resets history & sets chat_started_at
+    start_history(u1)
     start_history(u2)
-    # إزالة من الانتظار
     remove_from_wait(u1_id)
     remove_from_wait(u2_id)
     save_users()
-    # رسالة تعريف خفيفة (بدون أسماء ضمن الرسائل اللاحقة)
     try:
         delayed_send(bot, u1_id, INTRO_PARTNER, delay=0.5, reply_markup=main_menu(in_chat=True))
         delayed_send(bot, u2_id, INTRO_PARTNER, delay=0.6, reply_markup=main_menu(in_chat=True))
