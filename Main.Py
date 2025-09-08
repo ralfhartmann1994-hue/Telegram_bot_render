@@ -147,23 +147,6 @@ def on_text(m: Message):
                  reply_markup=main_menu(in_chat=False))
 
 # ==================== دوال المساعدة للتسجيل ========
-def handle_gender(uid, txt):
-    u = users[uid]
-    if txt not in GENDERS:
-        kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        kb.add(KeyboardButton("ذكر"), KeyboardButton("أنثى"), KeyboardButton("أخرى"))
-        delayed_send(bot, uid, "اختر من الأزرار: ذكر / أنثى / أخرى", delay=0.3, reply_markup=kb)
-        return
-    u["gender"]=txt; u["state"]="AWAIT_NAME"; save_users()
-    delayed_send(bot, uid, "أدخل اسمك (٢–٣٠ حرفًا، بدون أرقام):", delay=0.3, reply_markup=ReplyKeyboardRemove())
-
-def handle_name(uid, txt):
-    u = users[uid]
-    name = sanitize_name(txt)
-    if not name: delayed_send(bot, uid,"❌ الاسم غير صالح. حاول مجددًا:",delay=0.3); return
-    u["name"]=name; u["state"]="AWAIT_AGE"; save_users()
-    delayed_send(bot, uid,"أدخل عمرك (10–120):",delay=0.3)
-
 def handle_age(uid, txt):
     u = users[uid]
     age = sanitize_age(txt)
@@ -174,8 +157,17 @@ def handle_age(uid, txt):
     u["state"] = None  # إعادة ضبط الحالة قبل أي إرسال
     save_users()
 
-    # إرسال رسالة ترحيب مناسبة حسب topic (أو عامة إذا لم يختَر)
-    delayed_send(bot, uid, get_welcome_message(topic=u.get("topic")), delay=0.4)
+    # إرسال الرسالة الترحيبية الثابتة للمستخدم الجديد
+    welcome_lines = [
+        "لقد وصلت الى طريق مسدود.. بس منفتحو كرمالك 😎",
+        "تفضل يا مولاي...",
+        "هوووووب شلاح من رجلك وفوت يا مولاي",
+        "شلاح ولاااك............. من رجلك من رجلك 😂",
+        "اي تفضل تفضل تفضل ❤️❤️"
+    ]
+    for line in welcome_lines:
+        delayed_send(bot, uid, line, delay=0.4)
+
     delayed_send(bot, uid,"✅ تم الحفظ.\n"+profile_text(u),delay=0.4,reply_markup=main_menu(in_chat=False))
     delayed_send(bot, uid,"اضغط: 🔍 البحث عن دردشة عند جاهزيتك.",delay=0.5)
 
