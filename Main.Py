@@ -331,6 +331,7 @@ def start_chat(u1_id: int, u2_id: int):
         print(f"[INTRO ERROR] {e}")
 
 # ==================== Webhook + Flask ====================
+from flask import Flask, request
 app = Flask(__name__)
 
 @app.route(f"/{WEBHOOK_PATH}", methods=["POST"])
@@ -343,19 +344,24 @@ def webhook():
 def set_webhook():
     url = os.environ.get("WEBHOOK_URL")
     if not url:
-        raise RuntimeError("WEBHOOK_URL مفقود. أضفه في Render → Environment.")
-    full_url = f"{url}/{WEBHOOK_PATH}"
+        raise RuntimeError("WEBHOOK_URL مفقود. أضفه في Environment Variables في Render.")
     bot.remove_webhook()
-    bot.set_webhook(full_url)
-    print(f"[WEBHOOK] Set to {full_url}")
+    bot.set_webhook(f"{url}/{WEBHOOK_PATH}")
+    print(f"[WEBHOOK] Set to {url}/{WEBHOOK_PATH}")
 
 # ==================== التشغيل الرئيسي ====================
 if __name__ == "__main__":
     print("[BOOT] Loading users...")
     load_users()
     print(f"[BOOT] Users loaded: {len(users)}")
-    set_webhook()
+
+    try:
+        set_webhook()
+    except Exception as e:
+        print(f"[WEBHOOK ERROR] {e}")
+
     start_timeout_watcher(bot)
+
     port = int(os.environ.get("PORT", 5000))
     print(f"[RUN] Webhook listening on port {port}…")
     app.run(host="0.0.0.0", port=port) 
