@@ -1,4 +1,4 @@
-# main.py
+# Main.py
 import os
 import time
 import telebot
@@ -163,16 +163,17 @@ def handle_age(uid, txt):
     delayed_send(bot, uid,"✅ تم الحفظ.\n"+profile_text(u),delay=0.4,reply_markup=main_menu(in_chat=False))
     delayed_send(bot, uid,"اضغط: 🔍 البحث عن دردشة عند جاهزيتك.",delay=0.5)
 
+# ==================== تعديل الاسم والعمر ====================
 def handle_edit_name(uid, txt):
-    u = users[uid]; name=sanitize_name(txt)
+    u = users[uid]; name = sanitize_name(txt)
     if not name: delayed_send(bot, uid,"❌ الاسم غير صالح. حاول مجددًا:",delay=0.2); return
-    u["name"]=name; u["state"]=None; save_users()
+    u["name"] = name; u["state"] = None; save_users()
     delayed_send(bot, uid,"✅ تم التحديث.\n"+profile_text(u),delay=0.3,reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
 def handle_edit_age(uid, txt):
-    u = users[uid]; age=sanitize_age(txt)
+    u = users[uid]; age = sanitize_age(txt)
     if age is None: delayed_send(bot, uid,"❌ العمر غير صالح. أدخل رقمًا بين 10 و120:",delay=0.2); return
-    u["age"]=age; u["state"]=None; save_users()
+    u["age"] = age; u["state"] = None; save_users()
     delayed_send(bot, uid,"✅ تم التحديث.\n"+profile_text(u),delay=0.3,reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
 # ==================== البحث عن دردشة ====================
@@ -257,7 +258,7 @@ def handle_chat_message(uid, txt, u):
     except Exception as e:
         print(f"[RELAY ERROR] {e}")
 
-# ==================== دوال المساعدة الداخلية للدردشة ====================
+# ==================== بدء / إنهاء المحادثة ====================
 def handle_leave_request(uid, u):
     started = u.get("chat_started_at") or 0
     elapsed = time.time() - started
@@ -313,7 +314,6 @@ def handle_report(uid, u, txt):
     else:
         delayed_send(bot, uid, "اختر: نعم ✅ / لا ❌", delay=0.2, reply_markup=yes_no_menu())
 
-# ==================== بدء / إنهاء المحادثة ====================
 def start_chat(u1_id: int, u2_id: int):
     u1 = users[u1_id]
     u2 = users[u2_id]
@@ -358,4 +358,4 @@ if __name__ == "__main__":
     start_timeout_watcher(bot)
     port = int(os.environ.get("PORT", 5000))
     print(f"[RUN] Webhook listening on port {port}…")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port) 
