@@ -107,33 +107,44 @@ def on_text(m: Message):
     if u.get("banned_full"):
         return
 
-    state = u.get("state")
+    state = u.get("state") or ""
 
-    # ======= تسجيل أول مرة =======
-    if state == "AWAIT_GENDER":
-        handle_gender(uid, txt); return
-    if state == "AWAIT_NAME":
-        handle_name(uid, txt); return
-    if state == "AWAIT_AGE":
-        handle_age(uid, txt); return
+    # حالات التسجيل
+    if state == "AWAIT_GENDER": handle_gender(uid, txt); return
+    if state == "AWAIT_NAME": handle_name(uid, txt); return
+    if state == "AWAIT_AGE": handle_age(uid, txt); return
 
-    # ======= أزرار القائمة =======
-    if txt == "👤 ملفي": delayed_send(bot, uid, profile_text(u), delay=0.2, reply_markup=main_menu(in_chat=bool(u.get("partner")))); return
-    if txt == "✏️ تعديل الاسم": u["state"]="EDIT_NAME"; save_users(); delayed_send(bot, uid,"أدخل الاسم الجديد:",delay=0.2,reply_markup=ReplyKeyboardRemove()); return
+    # أزرار القائمة
+    if txt == "👤 ملفي":
+        delayed_send(bot, uid, profile_text(u), delay=0.2,
+                     reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+        return
+    if txt == "✏️ تعديل الاسم":
+        u["state"] = "EDIT_NAME"; save_users()
+        delayed_send(bot, uid,"أدخل الاسم الجديد:",delay=0.2,reply_markup=ReplyKeyboardRemove())
+        return
     if state == "EDIT_NAME": handle_edit_name(uid, txt); return
-    if txt == "🎂 تعديل العمر": u["state"]="EDIT_AGE"; save_users(); delayed_send(bot, uid,"أدخل العمر الجديد (10–120):",delay=0.2,reply_markup=ReplyKeyboardRemove()); return
+    if txt == "🎂 تعديل العمر":
+        u["state"] = "EDIT_AGE"; save_users()
+        delayed_send(bot, uid,"أدخل العمر الجديد (10–120):",delay=0.2,reply_markup=ReplyKeyboardRemove())
+        return
     if state == "EDIT_AGE": handle_edit_age(uid, txt); return
-    if txt == "🆘 مساعدة": delayed_send(bot, uid, HELP, delay=0.2, reply_markup=main_menu(in_chat=bool(u.get("partner")))); return
+    if txt == "🆘 مساعدة":
+        delayed_send(bot, uid, HELP, delay=0.2,
+                     reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+        return
     if txt == "🔍 البحث عن دردشة": handle_search_request(uid); return
 
-    # ======= اختيار موضوع =======
+    # اختيار موضوع / الفئة
     if state in ["CHOOSE_TOPIC", "CHOOSE_TARGET_GENDER"]:
         handle_topic_selection(uid, txt); return
 
-    # ======= داخل المحادثة =======
+    # داخل الدردشة
     if u.get("partner"): handle_chat_message(uid, txt, u); return
 
-    delayed_send(bot, uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", delay=0.2, reply_markup=main_menu(in_chat=False))
+    # افتراضي
+    delayed_send(bot, uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", delay=0.2,
+                 reply_markup=main_menu(in_chat=False))
 
 # ==================== دوال المساعدة للتسجيل ========
 def handle_gender(uid, txt):
@@ -156,9 +167,14 @@ def handle_name(uid, txt):
 def handle_age(uid, txt):
     u = users[uid]
     age = sanitize_age(txt)
-    if age is None: delayed_send(bot, uid,"❌ العمر غير صالح. أدخل رقمًا بين 10 و120:",delay=0.3); return
-    u["age"]=age; u["state"]=None; save_users()
-    # رسالة ترحيب عشوائية خاصة بالفئة بعد التسجيل
+    if age is None:
+        delayed_send(bot, uid,"❌ العمر غير صالح. أدخل رقمًا بين 10 و120:",delay=0.3)
+        return
+    u["age"] = age
+    u["state"] = None  # إعادة ضبط الحالة قبل أي إرسال
+    save_users()
+
+    # إرسال رسالة ترحيب مناسبة حسب topic (أو عامة إذا لم يختَر)
     delayed_send(bot, uid, get_welcome_message(topic=u.get("topic")), delay=0.4)
     delayed_send(bot, uid,"✅ تم الحفظ.\n"+profile_text(u),delay=0.4,reply_markup=main_menu(in_chat=False))
     delayed_send(bot, uid,"اضغط: 🔍 البحث عن دردشة عند جاهزيتك.",delay=0.5)
