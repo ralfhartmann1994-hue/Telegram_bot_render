@@ -70,35 +70,53 @@ def cmd_start(m: Message):
     ensure_user(uid)
     u = users[uid]
 
+    print(f"[START] UID={uid}, state={u.get('state')}, gender={u.get('gender')}")  # لتتبع المشاكل
+
     if u.get("banned_full"):
-        delayed_send(bot, uid, BANNED, delay=0.4)
+        try:
+            delayed_send(bot, uid, BANNED, delay=0.4)
+        except Exception as e:
+            print(f"[DELAYED_SEND ERROR] {e}")
         return
 
-    # مستخدم جديد
-    if not u.get("gender"):
-        welcome_text = (
-            "لقد وصلت الى طريق مسدود.. بس منفتحو كرمالك 😎\n"
-            "تفضل يا مولاي...\n"
-            "هوووووب شلاح من رجلك وفوت يا مولاي\n"
-            "شلاح ولاااك............. من رجلك من رجلك 😂\n"
-            "اي تفضل تفضل تفضل ❤️❤️"
-        )
+    # رسالة ترحيب ثابتة للجميع
+    welcome_text = (
+        "لقد وصلت الى طريق مسدود.. بس منفتحو كرمالك 😎\n"
+        "تفضل يا مولاي...\n"
+        "هوووووب شلاح من رجلك وفوت يا مولاي\n"
+        "شلاح ولاااك............. من رجلك من رجلك 😂\n"
+        "اي تفضل تفضل تفضل ❤️❤️"
+    )
+    try:
         delayed_send(bot, uid, welcome_text, delay=0.4, reply_markup=ReplyKeyboardRemove())
-        update_user(uid, {"state": "AWAIT_GENDER"})
+    except Exception as e:
+        print(f"[DELAYED_SEND ERROR] {e}")
+
+    # إذا المستخدم جديد (بدون gender)
+    if not u.get("gender"):
+        u["state"] = "AWAIT_GENDER"
+        save_users()
         kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         kb.add(KeyboardButton("ذكر"), KeyboardButton("أنثى"), KeyboardButton("أخرى"))
-        delayed_send(bot, uid, "اختر الجنس (مرة واحدة فقط):", delay=0.8, reply_markup=kb)
+        try:
+            delayed_send(bot, uid, "اختر الجنس (مرة واحدة فقط):", delay=0.8, reply_markup=kb)
+        except Exception as e:
+            print(f"[DELAYED_SEND ERROR] {e}")
         return
 
     # مستخدم عائد
-    update_user(uid, {"state": None})
-    delayed_send(
-        bot,
-        uid,
-        "مرحبًا من جديد! اختر من القائمة:",
-        delay=0.4,
-        reply_markup=main_menu(in_chat=bool(u.get("partner")))
-    )
+    u["state"] = None
+    save_users()
+    try:
+        delayed_send(
+            bot,
+            uid,
+            "مرحبًا من جديد! اختر من القائمة:",
+            delay=0.4,
+            reply_markup=main_menu(in_chat=bool(u.get("partner")))
+        )
+    except Exception as e:
+        print(f"[DELAYED_SEND ERROR] {e}")
 
 @bot.message_handler(commands=["help"])
 def cmd_help(m: Message):
