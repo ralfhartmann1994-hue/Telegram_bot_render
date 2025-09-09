@@ -117,7 +117,7 @@ def cmd_start(m: Message):
         delayed_send(bot, uid, BANNED, delay=0.4)
         return
 
-    # ---- إرسال رسالة البداية العشوائية ----
+    # ---- إرسال رسالة البداية العشوائية من START_MESSAGES ----
     welcome_text = get_welcome_message(topic="START")
     delayed_send(bot, uid, welcome_text, delay=0.4, reply_markup=ReplyKeyboardRemove())
 
@@ -126,8 +126,8 @@ def cmd_start(m: Message):
         u["state"] = "AWAIT_GENDER"
         save_users()
         kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        kb.add(*[KeyboardButton(g) for g in GENDERS])
-        delayed_send(bot, uid, "اختر الجنس (مرة واحدة فقط):", delay=0.8, reply_markup=kb)
+        kb.add(*[KeyboardButton(g) for g in config.GENDERS])
+        delayed_send(bot, uid, "اختر جنسًا (مرة واحدة فقط):", delay=0.8, reply_markup=kb)
         return
 
     # ---- مستخدم عائد ----
@@ -140,7 +140,6 @@ def cmd_start(m: Message):
         delay=0.4,
         reply_markup=main_menu(in_chat=bool(u.get("partner")))
     )
-
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
