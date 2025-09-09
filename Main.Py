@@ -113,41 +113,49 @@ def cmd_start(m: Message):
     ensure_user(uid)
     u = users[uid]
 
-    print(f"[START] UID={uid}, state={u.get('state')}, gender={u.get('gender')}")
+    print(f"[DEBUG] /start received from UID={uid}, state={u.get('state')}")
 
     if u.get("banned_full"):
-        safe_delayed_send(uid, BANNED, delay=0.4)
+        try:
+            delayed_send(bot, uid, BANNED, delay=0.4)
+        except Exception as e:
+            print(f"[ERROR] delayed_send BANNED: {e}")
         return
 
-    # إذا هذه هي المرة الأولى (لم يدخل سابقًا) أرسل رسالة عامة عشوائية
-    if not u.get("started"):
-        welcome_text = get_welcome_message()  # من messages.py -> رسالة عامة عشوائية
-        u["started"] = True
+    # إذا المستخدم جديد ولم يتلقَ رسالة ترحيب أولى
+    if not u.get("received_welcome"):
+        welcome_text = get_welcome_message(topic=None)  # GENERAL_WELCOME_MESSAGES
         try:
-            save_users()
+            delayed_send(bot, uid, welcome_text, delay=0.4, reply_markup=ReplyKeyboardRemove())
+            update_user(uid, {"received_welcome": True})
         except Exception as e:
-            print(f"[SAVE_USERS ERROR] {e}")
-        safe_delayed_send(uid, welcome_text, delay=0.4, reply_markup=ReplyKeyboardRemove())
+            print(f"[ERROR] delayed_send WELCOME: {e}")
 
-    # إذا المستخدم لم يحدد الجنس بعد
+    # إذا المستخدم جديد (بدون gender)
     if not u.get("gender"):
         u["state"] = "AWAIT_GENDER"
-        try:
-            save_users()
-        except Exception:
-            pass
+        save_users()
         kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        kb.add(KeyboardButton("ذكر"), KeyboardButton("أنثى"), KeyboardButton("أخرى"))
-        safe_delayed_send(uid, "اختر الجنس (مرة واحدة فقط):", delay=0.6, reply_markup=kb)
+        kb.add(*[KeyboardButton(g) for g in GENDERS])
+        try:
+            delayed_send(bot, uid, "اختر الجنس (مرة واحدة فقط):", delay=0.8, reply_markup=kb)
+        except Exception as e:
+            print(f"[ERROR] delayed_send AWAIT_GENDER: {e}")
         return
 
     # مستخدم عائد
     u["state"] = None
+    save_users()
     try:
-        save_users()
-    except Exception:
-        pass
-    safe_delayed_send(uid, "مرحبًا من جديد! اختر من القائمة:", delay=0.4, reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+        delayed_send(
+            bot,
+            uid,
+            "مرحبًا من جديد! اختر من القائمة:",
+            delay=0.4,
+            reply_markup=main_menu(in_chat=bool(u.get("partner")))
+        )
+    except Exception as e:
+        print(f"[ERROR] delayed_send returning user: {e}")
 
 
 # ---------- /help ----------
