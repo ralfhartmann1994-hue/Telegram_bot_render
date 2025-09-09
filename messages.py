@@ -2,10 +2,12 @@ import time
 import random
 
 def delayed_send(bot, chat_id, text, delay=0.8, **kwargs):
-    # تأخير خفيف لإحساس إنساني
-    time.sleep(max(0.0, delay))
-    bot.send_message(chat_id, text, **kwargs)
-
+    try:
+        time.sleep(max(0.0, delay))
+        bot.send_message(chat_id, text, **kwargs)
+    except Exception as e:
+        print(f"[ERROR] delayed_send failed: {e}")
+        
 # ============ الرسائل الترحيبية العامة ============
 GENERAL_WELCOME_MESSAGES = [
     "😂 أهلاً أهلاً… حضّر نفسك، يمكن تضحك أو يمكن تندم على دخولك!",
@@ -123,19 +125,16 @@ BANNED = "🚫 حسابك محظور بسبب مخالفات متكررة."
 # ============ دالة اختيار رسالة الترحيب ============
 def get_welcome_message(topic=None):
     """
-    ترجع رسالة ترحيبية مختلفة:
-    - إذا لم يتم اختيار موضوع بعد → رسالة عامة عشوائية.
-    - إذا تم اختيار موضوع → رسالة من الفئة المناسبة.
+    - topic=None => رسالة أولى عشوائية من GENERAL_WELCOME_MESSAGES
+    - topic="رياضة" أو أي فئة => رسالة عشوائية من الفئة المختارة
     """
-    if topic == "رياضة":
-        return random.choice(FOOTBALL_MESSAGES)
-    elif topic == "سياسة":
-        return random.choice(POLITICS_MESSAGES)
-    elif topic == "دين":
-        return random.choice(RELIGION_MESSAGES)
-    elif topic == "فلسفة":
-        return random.choice(PHILOSOPHY_MESSAGES)
-    elif topic == "تعارف":
-        return random.choice(SOCIAL_MESSAGES)
-    else:
-        return random.choice(GENERAL_WELCOME_MESSAGES) 
+    if topic is None:
+        return random.choice(GENERAL_WELCOME_MESSAGES)
+    topic_map = {
+        "رياضة": FOOTBALL_MESSAGES,
+        "سياسة": POLITICS_MESSAGES,
+        "دين": RELIGION_MESSAGES,
+        "فلسفة": PHILOSOPHY_MESSAGES,
+        "تعارف": SOCIAL_MESSAGES,
+    }
+    return random.choice(topic_map.get(topic, GENERAL_WELCOME_MESSAGES))
