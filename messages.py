@@ -1,4 +1,3 @@
-# messages.py
 import time
 import random
 
@@ -123,6 +122,11 @@ BANNED = "🚫 حسابك محظور بسبب مخالفات متكررة."
 
 # ============ دالة اختيار رسالة الترحيب ============
 def get_welcome_message(topic=None):
+    """
+    ترجع رسالة ترحيبية مختلفة:
+    - إذا لم يتم اختيار موضوع بعد → رسالة عامة عشوائية.
+    - إذا تم اختيار موضوع → رسالة من الفئة المناسبة.
+    """
     if topic == "رياضة":
         return random.choice(FOOTBALL_MESSAGES)
     elif topic == "سياسة":
@@ -134,4 +138,4 @@ def get_welcome_message(topic=None):
     elif topic == "تعارف":
         return random.choice(SOCIAL_MESSAGES)
     else:
-        return random.choice(GENERAL_WELCOME_MESSAGES)
+        return random.choice(GENERAL_WELCOME_MESSAGES) 
