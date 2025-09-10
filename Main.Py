@@ -127,13 +127,12 @@ def cmd_start(m: Message):
 
         # ✅ رسالة ترحيب عشوائية من مجموعة START_MESSAGES
         text = get_welcome_message("START")
+        bot.send_message(chat_id, text)
 
-        # ✅ إنشاء لوحة اختيار الجنس
+        # ✅ سؤال الجنس + الكيبورد
         kb = ReplyKeyboardMarkup(resize_keyboard=True)
         kb.add(*[KeyboardButton(g) for g in config.GENDERS])
-
-        # ✅ إرسال الرسالة للمستخدم
-        bot.send_message(chat_id, text, reply_markup=kb)
+        bot.send_message(chat_id, "💡 اختر جنسك للمتابعة:", reply_markup=kb)
 
     except Exception as e:
         print(f"[CRITICAL] cmd_start exception: {e}")
