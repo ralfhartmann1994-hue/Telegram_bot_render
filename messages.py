@@ -1,12 +1,15 @@
 import time
 import random
 
-def delayed_send(bot, chat_id, text, delay=0.8, **kwargs):
+# messages.py
+def delayed_send(bot, chat_id, text, **kwargs):
+    """
+    Webhook-safe: إرسال فوري بدون sleep، مع طباعة خطأ إذا فشل.
+    """
     try:
-        time.sleep(max(0.0, delay))
         bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
-        print(f"[ERROR] delayed_send failed: {e}")
+        print(f"[SEND_MESSAGE ERROR] {e} | text: {text}")
         
 # ============ رسائل البداية / ستارت ============
 START_MESSAGES = [
