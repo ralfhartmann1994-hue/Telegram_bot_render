@@ -109,37 +109,45 @@ def safe_delayed_send(uid, text, delay=0.4, **kwargs):
 # ---------- /start ----------
 @bot.message_handler(commands=["start"])
 def cmd_start(m: Message):
-    uid = m.from_user.id
-    ensure_user(uid)
-    u = users[uid]
+    try:
+        chat_id = m.chat.id  # أدق من from_user.id في سياقات مختلفة
+        print(f"[DEBUG] /start invoked. chat_id={chat_id}, from_user={m.from_user.id}")
 
-    if u.get("banned_full"):
-        delayed_send(bot, uid, BANNED, delay=0.4)
-        return
+        ensure_user(m.from_user.id)
+        u = users[m.from_user.id]
 
-    # ---- إرسال رسالة البداية العشوائية من START_MESSAGES ----
-    welcome_text = get_welcome_message(topic="START")
-    delayed_send(bot, uid, welcome_text, delay=0.4, reply_markup=ReplyKeyboardRemove())
+        if u.get("banned_full"):
+            print("[DEBUG] user is banned_full")
+            delayed_send(bot, chat_id, BANNED, reply_markup=ReplyKeyboardRemove())
+            return
 
-    # ---- إذا المستخدم جديد ولم يحدد الجنس ----
-    if not u.get("gender"):
-        u["state"] = "AWAIT_GENDER"
+        # --- رسالة البداية ---
+        try:
+            welcome_text = get_welcome_message(topic="START")
+            print(f"[DEBUG] welcome_text: {welcome_text!r}")
+        except Exception as e:
+            print(f"[ERROR] get_welcome_message failed: {e}")
+            welcome_text = "مرحبا!"  # احتياطي قصير
+
+        # إرسال الرسالة باستخدام delayed_send (آمنة الآن)
+        delayed_send(bot, chat_id, welcome_text, reply_markup=ReplyKeyboardRemove())
+
+        # --- طلب الجنس إذا لم يحدد المستخدم ---
+        if not u.get("gender"):
+            u["state"] = "AWAIT_GENDER"
+            save_users()
+            kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            kb.add(*[KeyboardButton(g) for g in getattr(config, "GENDERS", ["ذكر", "أنثى", "أخرى"])])
+            delayed_send(bot, chat_id, "اختر جنسًا (مرة واحدة فقط):", reply_markup=kb)
+            return
+
+        # --- مستخدم عائد ---
+        u["state"] = None
         save_users()
-        kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        kb.add(*[KeyboardButton(g) for g in config.GENDERS])
-        delayed_send(bot, uid, "اختر جنسًا (مرة واحدة فقط):", delay=0.8, reply_markup=kb)
-        return
+        delayed_send(bot, chat_id, "مرحبًا من جديد! اختر من القائمة:", reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
-    # ---- مستخدم عائد ----
-    u["state"] = None
-    save_users()
-    delayed_send(
-        bot,
-        uid,
-        "مرحبًا من جديد! اختر من القائمة:",
-        delay=0.4,
-        reply_markup=main_menu(in_chat=bool(u.get("partner")))
-    )
+    except Exception as e:
+        print(f"[CRITICAL] cmd_start exception: {e}\n{traceback.format_exc()}")
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
@@ -150,6 +158,15 @@ def cmd_help(m: Message):
         return
     safe_delayed_send(uid, HELP, delay=0.2, reply_markup=main_menu(in_chat=bool(users[uid].get("partner"))))
 
+#---------اختبار-----------
+@bot.message_handler(commands=["ping"])
+def cmd_ping(m: Message):
+    try:
+        cid = m.chat.id
+        print(f"[DEBUG] ping from {cid}")
+        bot.send_message(cid, "pong")
+    except Exception as e:
+        print(f"[ERROR] ping handler: {e}") 
 
 # ---------- معالجة نصية عامة (التحقق من الحالات والأزرار) ----------
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
