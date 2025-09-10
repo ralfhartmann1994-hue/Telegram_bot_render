@@ -219,12 +219,16 @@ def on_text(m: Message):
 # ---------- معالجة الجنس ----------
 def handle_gender(uid, txt):
     txt = txt.strip()
-    if txt not in getattr(config, "GENDERS", ["ذكر", "أنثى", "أخرى"]):
-        safe_delayed_send(uid, "اختر: ذكر / أنثى / أخرى", delay=0.2)
+    if txt not in getattr(config, "GENDERS", ["ذكر", "أنثى"]):
+        safe_delayed_send(uid, "اختر: ذكر / أنثى", delay=0.2)
         return
-    update_user(uid, {"gender": txt, "state": None})
-    safe_delayed_send(uid, "تم حفظ الجنس ✅", delay=0.2, reply_markup=main_menu(in_chat=False))
 
+    update_user(uid, {"gender": txt, "state": None})
+    safe_delayed_send(uid, f"✅ تم حفظ الجنس: {txt}", delay=0.2)
+
+    # التوجيه لاختيار الموضوع بعد حفظ الجنس
+    update_user(uid, {"state": "CHOOSE_TOPIC"})
+    safe_delayed_send(uid, "💡 الآن اختر موضوع النقاش الذي ترغب فيه:", delay=0.4, reply_markup=topics_menu())
 
 # ---------- تعديل الاسم ----------
 def handle_edit_name(uid, txt):
