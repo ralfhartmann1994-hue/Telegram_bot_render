@@ -111,32 +111,27 @@ def safe_delayed_send(uid, text, delay=0.4, **kwargs):
 def cmd_start(m: Message):
     chat_id = m.chat.id
     user_id = m.from_user.id
-    print(f"[DEBUG] /start invoked. chat_id={chat_id}, from_user={user_id}")
 
-    try:
-        # ✅ إذا المستخدم جديد ولم تتم تهيئته من قبل
-        if user_id not in users:
-            users[user_id] = {
-                "gender": None,
-                "target_gender": None,
-                "topic": None,
-                "respect": config.RESPECT_START,
-                "state": "idle",
-            }
-            print(f"[INIT] Added new user {user_id} to users dict.")
+    # إذا المستخدم جديد
+    if user_id not in users:
+        users[user_id] = {
+            "gender": None,
+            "target_gender": None,
+            "topic": None,
+            "respect": config.RESPECT_START,
+            "state": None,
+        }
 
-        # ✅ رسالة ترحيب عشوائية من مجموعة START_MESSAGES
-        text = get_welcome_message("START")
-        bot.send_message(chat_id, text)
+    # رسالة ترحيب عامة
+    safe_delayed_send(user_id, get_welcome_message("START"))
 
-        # ✅ سؤال الجنس + الكيبورد
-        kb = ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.add(*[KeyboardButton(g) for g in config.GENDERS])
-        bot.send_message(chat_id, "💡 اختر جنسك للمتابعة:", reply_markup=kb)
+    # عرض سؤال الجنس
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    kb.add(*[KeyboardButton(g) for g in config.GENDERS])
+    safe_delayed_send(user_id, "💡 اختر جنسك للمتابعة:", reply_markup=kb)
 
-    except Exception as e:
-        print(f"[CRITICAL] cmd_start exception: {e}")
-        bot.send_message(chat_id, "⚠️ حدث خطأ غير متوقع، جرب مرة أخرى.")
+    # **ضبط حالة الانتظار للجنس**
+    update_user(user_id, {"state": "AWAIT_GENDER"})
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
@@ -218,15 +213,15 @@ def on_text(m: Message):
 
 # ---------- معالجة الجنس ----------
 def handle_gender(uid, txt):
-    txt = txt.strip()
-    if txt not in getattr(config, "GENDERS", ["ذكر", "أنثى"]):
-        safe_delayed_send(uid, "اختر: ذكر / أنثى", delay=0.2)
+    if txt not in config.GENDERS:
+        safe_delayed_send(uid, "❌ اختر: ذكر / أنثى", delay=0.2)
         return
 
-    update_user(uid, {"gender": txt, "state": None})
+    update_user(uid, {"gender": txt})
+
     safe_delayed_send(uid, f"✅ تم حفظ الجنس: {txt}", delay=0.2)
 
-    # التوجيه لاختيار الموضوع بعد حفظ الجنس
+    # التوجيه لاختيار موضوع النقاش
     update_user(uid, {"state": "CHOOSE_TOPIC"})
     safe_delayed_send(uid, "💡 الآن اختر موضوع النقاش الذي ترغب فيه:", delay=0.4, reply_markup=topics_menu())
 
