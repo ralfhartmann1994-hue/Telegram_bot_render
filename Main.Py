@@ -141,40 +141,18 @@ def _topic_key(topic_text: str) -> str:
 
 # ---------- /start ----------
 @bot.message_handler(commands=["start"])
-def cmd_start(m: Message):
+def cmd_start(m):
     uid = m.from_user.id
-    ensure_user(uid)
-    u = users[uid]
+    ensure_user(uid)  # مهم عشان نسجل المستخدم قبل أي شيء
+    print(f"[START] user={uid}")
 
-    if u.get("banned_full"):
-        safe_delayed_send(uid, BANNED, delay=0.0)
-        return
-
-    # تهيئة حقول افتراضية (إن لم تكن موجودة)
-    defaults = {
-        "gender": None,
-        "target_gender": None,
-        "topic": None,
-        "partner": None,
-        "respect": getattr(config, "RESPECT_START", 80),
-        "state": None,
-        "chat_started_at": None,
-        "history": [],
-    }
-    for k, v in defaults.items():
-        if k not in u:
-            u[k] = v
-    save_users()
-
-    # رسالة ترحيب عشوائية (START)
-    safe_delayed_send(uid, get_welcome_message("START"), delay=0.0, reply_markup=ReplyKeyboardRemove())
-
-    # نعرض سؤال الجنس ونضبط الحالة إلى AWAIT_GENDER
-    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for g in getattr(config, "GENDERS", ["ذكر", "أنثى"]):
-        kb.add(KeyboardButton(g))
-    safe_delayed_send(uid, "💡 اختر جنسك للمتابعة:", delay=0.0, reply_markup=kb)
-    update_user(uid, {"state": STATE_AWAIT_GENDER})
+    text = get_welcome_message("START") + "\n\nاختر جنسك:"
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("👨 رجل", callback_data="male"),
+        types.InlineKeyboardButton("👩 امرأة", callback_data="female")
+    )
+    delayed_send(bot, uid, text, reply_markup=markup)
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
@@ -425,35 +403,24 @@ def handle_leave_confirm(uid, u, txt):
         safe_delayed_send(uid, "اختر: نعم ✅ / لا ❌", delay=0.0, reply_markup=yes_no_menu())
 
 # ---------- الإبلاغ ----------
-def handle_report_request(uid):
-    ensure_user(uid)
-    u = users[uid]
-    if not u.get("partner"):
-        safe_delayed_send(uid, "❌ أنت لست في دردشة الآن.", delay=0.0)
-        return
-    update_user(uid, {"state": STATE_CONFIRM_REPORT})
-    safe_delayed_send(uid, REPORT_CONFIRM, delay=0.0, reply_markup=yes_no_menu())
+@bot.callback_query_handler(func=lambda c: c.data in ["report_yes", "report_no"])
+def handle_report_confirm(c):
+    uid = c.from_user.id
+    partner_id = users.get(uid, {}).get("partner")
 
-def handle_report_confirm(uid, u, txt):
-    if txt == "نعم ✅":
-        pid = u.get("partner")
-        try:
-            result = review_history_and_penalize(uid, pid)
-        except Exception as e:
-            print(f"[review_history_and_penalize ERROR] {e}")
-            result = None
-        update_user(uid, {"state": None})
-        safe_delayed_send(uid, REPORT_OK, delay=0.0)
-        if result:
-            try:
-                safe_delayed_send(uid, REPORT_RESULT.format(lines=result.get("lines", "—"), respect=result.get("respect", "—")), delay=0.0)
-            except Exception:
-                pass
-    elif txt == "لا ❌":
-        update_user(uid, {"state": None})
-        safe_delayed_send(uid, "تم الإلغاء. شكراً لحرصك.", delay=0.0)
+    if c.data == "report_yes":
+        # سجل البلاغ
+        print(f"[REPORT] user={uid} reported partner={partner_id}")
+        delayed_send(bot, uid, "🚨 تم تسجيل البلاغ بنجاح.")
+
     else:
-        safe_delayed_send(uid, "اختر: نعم ✅ / لا ❌", delay=0.0, reply_markup=yes_no_menu())
+        delayed_send(bot, uid, "تم إلغاء البلاغ.")
+
+    # بعدها دائماً أرسل زر المغادرة
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🚪 مغادرة الدردشة", callback_data="leave"))
+    delayed_send(bot, uid, "ماذا تريد أن تفعل الآن؟", reply_markup=markup)
+    bot.answer_callback_query(c.id)
 
 # ---------- تمرير الرسائل بين الشركاء ----------
 def handle_chat_message(uid, txt, u):
