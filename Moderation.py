@@ -5,8 +5,14 @@ from config import PENALTY_PER_HIT, WARN_THRESHOLD, BAN_THRESHOLD, PARTIAL_BAN_D
 from storage import users, save_users
 from Bad_word import count_bad_words
 
-def is_muted(u) -> Tuple[bool, int | None]:
+def is_muted(obj) -> Tuple[bool, int | None]:
+    # إذا أُعطي uid، خذ users[uid]
+    if isinstance(obj, int):
+        u = users.get(obj) or {}
+    else:
+        u = obj or {}
     mu = u.get("mute_until")
+    ...
     if not mu:
         return (False, None)
     now = time.time()
