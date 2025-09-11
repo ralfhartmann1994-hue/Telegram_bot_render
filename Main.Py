@@ -43,7 +43,7 @@ from messages import (
     BANNED,
 )
 
-# Bad_word helper (إن وُجد) لتصفية الكلمات السيئة — إذا لم يكن الملف موجودًا عدّل الاستدعاء أو أنشئ دوال مماثلة
+# Bad_word helper (إن وُجد)
 try:
     from Bad_word import contains_bad_word, censor_text
 except Exception:
@@ -93,9 +93,9 @@ def topics_menu() -> ReplyKeyboardMarkup:
 
 def target_gender_menu() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    # نستخدم القيم كما في config.TARGET_GENDERS (المستخدم طلب فقط "رجل" و "امرأة")
     for tg in getattr(config, "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"]):
         kb.add(KeyboardButton(tg))
+    kb.add(KeyboardButton("أي"))
     return kb
 
 def yes_no_menu() -> ReplyKeyboardMarkup:
@@ -115,43 +115,70 @@ def update_user(uid, updates: dict):
     except Exception as e:
         print(f"[SAVE USER ERROR] {e}")
 
-# ---------- غلاف إرسال آمن يدعم delay ---------- 
-# (delayed_send موجود في messages.py ويقوم بالsleep ثم bot.send_message)
-def safe_delayed_send(uid, text, delay=0.0, **kwargs):
+# ---------- غلاف إرسال آمن (يتجنّب تمرير 'delay' إلى bot.send_message) ----------
+def safe_delayed_send(uid, text, delay: float = 0.0, **kwargs):
+    """
+    إرسال آمن: إن كان هناك تأخير نطبقه قبل الإرسال،
+    ثم نستعمل bot.send_message مباشرة (بدون تمرير باراميتر 'delay' إلى bot).
+    """
     try:
-        # delay افتراضي 0 لتكون الاستجابة فورية إلا عند الحاجة
-        delayed_send(bot, uid, text, delay=delay, **kwargs)
-    except TypeError as e:
-        # في حال كانت دالة delayed_send مختلفة أو kwargs غير مناسبة
-        print(f"[DELAYED_SEND TYPEERROR] {e}, trying direct send without delay")
-        try:
-            bot.send_message(uid, text, **{k:v for k,v in kwargs.items() if k != "delay"})
-        except Exception as e2:
-            print(f"[SEND_MESSAGE ERROR] {e2} | text: {text}")
+        if delay and isinstance(delay, (int, float)) and delay > 0:
+            time.sleep(delay)
+        bot.send_message(uid, text, **kwargs)
     except Exception as e:
-        print(f"[DELAYED_SEND ERROR] {e} | text: {text}")
+        print(f"[SEND_MESSAGE ERROR] {e} | text: {text}")
+
+# ---------- تغليف للتعامل مع append_history بتواقيع مختلفة ----------
+def append_history_safe(uid, text):
+    try:
+        # أسهل توقيع (إذا كانت دالتك تقبل (uid, text))
+        append_history(uid, text)
+    except TypeError:
+        # محاولة شكل آخر (إذا كانت append_history تقبل user-objects)
+        try:
+            pid = users[uid].get("partner")
+            if pid and pid in users:
+                append_history(users[uid], users[pid], uid, text)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+# ---------- تغليف للتعامل مع is_muted بتواقيع مختلفة ----------
+def is_user_muted(uid):
+    """يعيد (muted_bool, seconds_left_or_None)"""
+    try:
+        res = is_muted(users[uid])  # بعض الإصدارات تتوقع user object
+    except Exception:
+        try:
+            res = is_muted(uid)  # أو قد تتوقع uid
+        except Exception:
+            return (False, None)
+    # ممكن أن يرجع tuple أو boolean
+    if isinstance(res, tuple):
+        return res
+    return (bool(res), None)
 
 # ---------- دوال مساعدة صغيرة ----------
 def _topic_key(topic_text: str) -> str:
-    """يحاول استخراج النص العربي (بدون الايموجي) من عنصر TOPICS مثل '⚽ رياضة' -> 'رياضة'"""
     if not topic_text:
         return ""
     parts = topic_text.split()
     return parts[-1] if parts else topic_text
 
-# ---------- /start ----------
+# ---------- /start: الآن يتبع التسلسل: اسم -> جنس -> عمر -> القائمة ----------
 @bot.message_handler(commands=["start"])
 def cmd_start(m: Message):
     uid = m.from_user.id
     ensure_user(uid)
     print(f"[START] user={uid}")
 
-    # رسالة ترحيب
+    # رسالة ترحيب عشوائية
     safe_delayed_send(uid, get_welcome_message("START"), reply_markup=ReplyKeyboardRemove())
 
-    # اسأل عن الاسم أولًا
+    # 1) اسأل عن الاسم أولًا
     update_user(uid, {"state": STATE_AWAIT_NAME})
-    safe_delayed_send(uid, "✏️ ما اسمك؟", reply_markup=ReplyKeyboardRemove())
+    safe_delayed_send(uid, "✏️ ما اسمك؟ (2–30 حرفاً)", reply_markup=ReplyKeyboardRemove())
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
@@ -160,9 +187,9 @@ def cmd_help(m: Message):
     ensure_user(uid)
     if users[uid].get("banned_full"):
         return
-    safe_delayed_send(uid, HELP, delay=0.0, reply_markup=main_menu(in_chat=bool(users[uid].get("partner"))))
+    safe_delayed_send(uid, HELP, reply_markup=main_menu(in_chat=bool(users[uid].get("partner"))))
 
-# ---------- ping (اختبار) ----------
+# ---------- اختبار ping ----------
 @bot.message_handler(commands=["ping"])
 def cmd_ping(m: Message):
     try:
@@ -184,41 +211,49 @@ def on_text(m: Message):
 
     state = u.get("state") or ""
 
-    # حالات انتظـار
+    # حالات انتظار منطقية (الاسم/الجنس/العمر...)
     if state == STATE_AWAIT_GENDER:
         handle_gender(uid, txt); return
+
     if state == STATE_AWAIT_NAME:
-        handle_edit_name(uid, txt); return
+        # لو المستخدم لديه اسم سابقًا، فهذه حالة "تعديل الاسم"
+        if u.get("name"):
+            handle_edit_name(uid, txt); return
+        else:
+            handle_name_registration(uid, txt); return
+
     if state == STATE_AWAIT_AGE:
         handle_edit_age(uid, txt); return
+
     if state == STATE_CHOOSE_TOPIC:
         handle_topic_selection(uid, txt); return
+
     if state == STATE_CHOOSE_TARGET_GENDER:
         handle_target_gender(uid, txt); return
+
     if state == STATE_CONFIRM_LEAVE:
         handle_leave_confirm(uid, u, txt); return
+
     if state == STATE_CONFIRM_REPORT:
         handle_report_confirm(uid, u, txt); return
-    if state == STATE_AWAIT_NAME:
-        handle_name_registration(uid, txt); return
 
     # أوامر أزرار ثابتة
     if txt == "👤 ملفي":
-        safe_delayed_send(uid, profile_text(u), delay=0.0, reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+        safe_delayed_send(uid, profile_text(u), reply_markup=main_menu(in_chat=bool(u.get("partner"))))
         return
 
     if txt == "✏️ تعديل الاسم":
         update_user(uid, {"state": STATE_AWAIT_NAME})
-        safe_delayed_send(uid, "أدخل الاسم الجديد:", delay=0.0, reply_markup=ReplyKeyboardRemove())
+        safe_delayed_send(uid, "أدخل الاسم الجديد:", reply_markup=ReplyKeyboardRemove())
         return
 
     if txt == "🎂 تعديل العمر":
         update_user(uid, {"state": STATE_AWAIT_AGE})
-        safe_delayed_send(uid, "أدخل العمر الجديد (10–120):", delay=0.0, reply_markup=ReplyKeyboardRemove())
+        safe_delayed_send(uid, "أدخل العمر الجديد (10–120):", reply_markup=ReplyKeyboardRemove())
         return
 
     if txt == "🆘 مساعدة":
-        safe_delayed_send(uid, HELP, delay=0.0, reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+        safe_delayed_send(uid, HELP, reply_markup=main_menu(in_chat=bool(u.get("partner"))))
         return
 
     if txt == "🔍 البحث عن دردشة":
@@ -229,91 +264,83 @@ def on_text(m: Message):
         handle_chat_message(uid, txt, u); return
 
     # Default
-    safe_delayed_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", delay=0.0, reply_markup=main_menu(in_chat=False))
+    safe_delayed_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", reply_markup=main_menu(in_chat=False))
 
-# ---------- معالجة اختيار الجنس ----------
+# ---------- معالجة اختيار/حفظ الجنس ----------
 def handle_gender(uid, txt):
     txt = txt.strip()
     if txt not in config.GENDERS:
-        delayed_send(
-            bot,
-            uid,
-            "❌ اختر: ذكر / أنثى",
-            reply_markup=ReplyKeyboardMarkup(
-                resize_keyboard=True,
-                one_time_keyboard=True
-            ).add(*[KeyboardButton(g) for g in config.GENDERS])
-        )
+        kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        kb.add(*[KeyboardButton(g) for g in config.GENDERS])
+        safe_delayed_send(uid, "❌ اختر: ذكر / أنثى", reply_markup=kb)
         return
 
-    # حفظ الجنس وتغيير الحالة إلى انتظار العمر
+    # حفظ الجنس والانتقال لطلب العمر
     update_user(uid, {"gender": txt, "state": STATE_AWAIT_AGE})
-
-    # أرسل رسالة تأكيدية
     safe_delayed_send(uid, f"✅ تم حفظ الجنس: {txt}")
-
-    # اسأل عن العمر بعد اختيار الجنس
+    # نطلب العمر بعد الجنس
     safe_delayed_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
 
-    # وجه المستخدم لاحقًا للبدء بالبحث أو اختيار الموضوع
-    delayed_send(bot, uid, "يمكنك الآن الضغط على 🔍 البحث عن دردشة لبدء.", reply_markup=main_menu(in_chat=False))
-
-#-------- معالجة الاسم -----------
+# ---------- معالجة تسجيل الاسم (الذي يأتي مباشرة بعد /start) ----------
 def handle_name_registration(uid, txt):
     name = sanitize_name(txt)
-    if not (2 <= len(name) <= 30):
-        safe_delayed_send(uid, "❌ الاسم غير صالح، حاول مجددًا:")
+    if not name:
+        safe_delayed_send(uid, "❌ الاسم غير صالح — يجب أن يحتوي حروفًا فقط ويكون 2–30 حرفاً. حاول مجدداً:")
         return
     update_user(uid, {"name": name, "state": STATE_AWAIT_GENDER})
-
     # اسأل عن الجنس مع أزرار
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     kb.add(*[KeyboardButton(g) for g in config.GENDERS])
-    safe_delayed_send(uid, "💡 اختر جنسك:", reply_markup=kb) 
+    safe_delayed_send(uid, f"✅ تم حفظ الاسم: {name}")
+    safe_delayed_send(uid, "💡 اختر جنسك (مرة واحدة فقط):", reply_markup=kb)
 
-# ---------- تعديل الاسم ----------
+# ---------- تعديل الاسم (يُستدعى أيضاً عندما يضغط المستخدم ✏️ تعديل الاسم) ----------
 def handle_edit_name(uid, txt):
     name = sanitize_name(txt)
+    if not name:
+        safe_delayed_send(uid, "❌ الاسم غير صالح — حاول مجدداً:")
+        return
     update_user(uid, {"name": name, "state": None})
-    safe_delayed_send(uid, f"✅ تم تحديث الاسم إلى: {name}", delay=0.0, reply_markup=main_menu(in_chat=False))
+    safe_delayed_send(uid, f"✅ تم تحديث الاسم إلى: {name}", reply_markup=main_menu(in_chat=False))
 
-# ---------- تعديل العمر ----------
+# ---------- تعديل/حفظ العمر ----------
 def handle_edit_age(uid, txt):
     age = sanitize_age(txt)
     if not age:
-        safe_delayed_send(uid, "❌ العمر غير صالح. أرسل رقمًا بين 10 و120.", delay=0.0, reply_markup=ReplyKeyboardRemove())
+        safe_delayed_send(uid, "❌ العمر غير صالح. أرسل رقمًا بين 10 و120.", reply_markup=ReplyKeyboardRemove())
         return
+    # بعد حفظ العمر ننهي التسجيل (إن كان تسجيلًا جديدًا) ونُعيد القائمة الرئيسية
     update_user(uid, {"age": age, "state": None})
-    safe_delayed_send(uid, f"✅ تم تحديث العمر إلى: {age}", delay=0.0, reply_markup=main_menu(in_chat=False))
+    safe_delayed_send(uid, f"✅ تم حفظ العمر: {age}", reply_markup=main_menu(in_chat=False))
 
 # ---------- بدء البحث عن دردشة (يعرض قائمة المواضيع) ----------
 def handle_search_request(uid):
     ensure_user(uid)
     u = users[uid]
     if u.get("partner"):
-        safe_delayed_send(uid, "⚠️ أنت بالفعل في دردشة!", delay=0.0)
+        safe_delayed_send(uid, "⚠️ أنت بالفعل في دردشة!", reply_markup=main_menu(in_chat=True))
         return
     update_user(uid, {"state": STATE_CHOOSE_TOPIC})
-    safe_delayed_send(uid, "اختر موضوع النقاش:", delay=0.0, reply_markup=topics_menu())
+    safe_delayed_send(uid, "اختر موضوع النقاش:", reply_markup=topics_menu())
 
 # ---------- اختيار الموضوع ----------
 def handle_topic_selection(uid, txt):
     txt = txt.strip()
     if txt not in config.TOPICS:
-        safe_delayed_send(uid, "❌ اختر موضوعًا صالحًا من القائمة.", delay=0.0, reply_markup=topics_menu())
+        safe_delayed_send(uid, "❌ اختر موضوعًا صالحًا من القائمة.", reply_markup=topics_menu())
         return
     update_user(uid, {"topic": txt, "state": STATE_CHOOSE_TARGET_GENDER})
-    safe_delayed_send(uid, f"تم اختيار الموضوع: {txt}\nالآن اختر جنس الطرف الذي تريده:", delay=0.0, reply_markup=target_gender_menu())
+    safe_delayed_send(uid, f"تم اختيار الموضوع: {txt}\nالآن اختر جنس الطرف الذي تريده:", reply_markup=target_gender_menu())
 
 # ---------- اختيار جنس الشريك وبدء البحث ----------
 def handle_target_gender(uid, txt):
     txt = txt.strip()
     valid = getattr(config, "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"])
-    if txt not in valid:
-        safe_delayed_send(uid, f"❌ اختر: {' / '.join(valid)}", delay=0.0, reply_markup=target_gender_menu())
+    valid_with_any = valid + ["أي"]
+    if txt not in valid_with_any:
+        safe_delayed_send(uid, f"❌ اختر: {' / '.join(valid_with_any)}", reply_markup=target_gender_menu())
         return
 
-    # تحويل الواجهة إلى قيمة منطقية
     if "رجل" in txt:
         target = "male"
     elif "امرأة" in txt or "امرأ" in txt:
@@ -325,62 +352,45 @@ def handle_target_gender(uid, txt):
     topic = u.get("topic")
     update_user(uid, {"target_gender": target, "state": STATE_SEARCHING})
 
-    # رسالة ترحيب خاصة للموضوع (نمرّر المفتاح بدون الايموجي)
+    # رسالة ترحيب خاصة للموضوع
     topic_key = _topic_key(topic)
-    safe_delayed_send(uid, get_welcome_message(topic_key), delay=0.0)
+    safe_delayed_send(uid, get_welcome_message(topic_key))
+    safe_delayed_send(uid, SEARCHING, reply_markup=main_menu(in_chat=False))
 
-    # نعلم المستخدم أننا نبحث
-    safe_delayed_send(uid, SEARCHING, delay=0.0, reply_markup=main_menu(in_chat=False))
-
-    # أضف المستخدم إلى قائمة الانتظار بحسب Matchmaking — دعنا ندعم عدة تواقيع
+    # ملاحظة مهمة: توقيعات add_to_wait/try_match كما في matchmaking.py لديك:
+    # add_to_wait(topic, uid, target)  - try_match(uid, topic)
     try:
-        add_to_wait(uid, topic, target)
-    except TypeError:
-        try:
-            add_to_wait(uid, topic)
-        except Exception as e:
-            print(f"[add_to_wait ERROR] {e}")
+        add_to_wait(topic, uid, target)
+    except Exception as e:
+        print(f"[add_to_wait ERROR] {e}")
 
-    # حاول المطابقة — جرب الواجهات الممكنة
+    # حاول المطابقة (التوقيع: try_match(uid, topic))
     partner = None
     try:
-        partner = try_match(uid, topic, target)
-    except TypeError:
-        try:
-            partner = try_match(bot, uid, topic, target)
-        except Exception as e:
-            print(f"[try_match ERROR] {e}")
+        partner = try_match(uid, topic)
     except Exception as e:
         print(f"[try_match ERROR] {e}")
 
-    # إذا try_match أرجعت شريك (id) فنقوم بتهيئة الدردشة محليًا
+    # إذا نَجَحت المطابقة، جهّز الجلسة
     if partner:
         try:
             pid = int(partner)
-            # وحدّث الطرفين محليًا (بعض Matchmaking قد يفعل هذا داخليًا)
             update_user(uid, {"partner": pid, "state": None, "chat_started_at": time.time()})
             update_user(pid, {"partner": uid, "state": None, "chat_started_at": time.time()})
-            # بدء التاريخ إن وُجدت الدالة
             try:
                 start_history(uid); start_history(pid)
             except Exception:
                 pass
-            safe_delayed_send(uid, INTRO_PARTNER, delay=0.0, reply_markup=main_menu(in_chat=True))
+            safe_delayed_send(uid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
             try:
-                safe_delayed_send(pid, INTRO_PARTNER, delay=0.0, reply_markup=main_menu(in_chat=True))
+                safe_delayed_send(pid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
             except Exception:
                 pass
         except Exception as e:
             print(f"[MATCH SETUP ERROR] {e}")
 
-    # شغّل ووتشر للتايم آوت (إن وُجد)
-    try:
-        start_timeout_watcher(bot, uid, topic)
-    except TypeError:
-        try:
-            start_timeout_watcher(bot)
-        except Exception as e:
-            print(f"[start_timeout_watcher ERROR] {e}")
+    # (لا حاجة لتمرير uid/topic لبدء watcher — watcher مُشغّل عامة عند الإقلاع)
+    # إذا تريد أن تضمن إعادة تشغيل watcher للـ bot يمكنك استدعاؤه لكن توقيعه في matchmaking.py هو start_timeout_watcher(bot)
 
 # ---------- مغادرة الدردشة ----------
 def handle_leave_request(uid):
@@ -389,19 +399,19 @@ def handle_leave_request(uid):
     started = u.get("chat_started_at") or 0
     elapsed = time.time() - started
     if elapsed < getattr(config, "LEAVE_DELAY", 30):
-        safe_delayed_send(uid, LEAVE_TOO_SOON.format(remain=int(getattr(config, "LEAVE_DELAY", 30) - elapsed)), delay=0.0)
+        safe_delayed_send(uid, LEAVE_TOO_SOON.format(remain=int(getattr(config, "LEAVE_DELAY", 30) - elapsed)))
         return
     update_user(uid, {"state": STATE_CONFIRM_LEAVE})
-    safe_delayed_send(uid, LEAVE_CONFIRM, delay=0.0, reply_markup=yes_no_menu())
+    safe_delayed_send(uid, LEAVE_CONFIRM, reply_markup=yes_no_menu())
 
 def handle_leave_confirm(uid, u, txt):
     if txt == "نعم ✅":
         pid = u.get("partner")
         if pid:
-            # نافذة إنهاء الجلسة عبر Profile_manger.end_session أو دوال بديلة
             try:
-                end_session(uid, pid)  # أفضل شكل إن كانت الدالة تعمل على ids
-            except TypeError:
+                # قد يعمل end_session بمعرفين أو بكائنات — نحاول عدة محاولات
+                end_session(uid, pid)
+            except Exception:
                 try:
                     end_session(u, users.get(pid))
                 except Exception:
@@ -410,90 +420,95 @@ def handle_leave_confirm(uid, u, txt):
                         end_session(pid)
                     except Exception as e:
                         print(f"[END_SESSION ERROR] {e}")
-            # تنظيف الحقول
             update_user(uid, {"partner": None, "state": None, "chat_started_at": None})
             update_user(pid, {"partner": None, "state": None, "chat_started_at": None})
-            safe_delayed_send(uid, "لقد غادرت الدردشة.", delay=0.0, reply_markup=main_menu(in_chat=False))
+            safe_delayed_send(uid, "لقد غادرت الدردشة.", reply_markup=main_menu(in_chat=False))
             try:
-                safe_delayed_send(pid, "شريكك غادر الدردشة.", delay=0.0, reply_markup=main_menu(in_chat=False))
+                safe_delayed_send(pid, "شريكك غادر الدردشة.", reply_markup=main_menu(in_chat=False))
             except Exception:
                 pass
         else:
             update_user(uid, {"state": None})
-            safe_delayed_send(uid, "لم يتم العثور على شريك حالي.", delay=0.0)
+            safe_delayed_send(uid, "لم يتم العثور على شريك حالي.")
     elif txt == "لا ❌":
         update_user(uid, {"state": None})
-        safe_delayed_send(uid, "تم الإلغاء. تابع الدردشة 👌", delay=0.0)
+        safe_delayed_send(uid, "تم الإلغاء. تابع الدردشة 👌")
     else:
-        safe_delayed_send(uid, "اختر: نعم ✅ / لا ❌", delay=0.0, reply_markup=yes_no_menu())
+        safe_delayed_send(uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
 
-# ---------- الإبلاغ ----------
-@bot.callback_query_handler(func=lambda c: c.data in ["report_yes", "report_no"])
+# ---------- الإبلاغ (نص عادي نعم/لا مُرسَل من لوحة yes_no_menu) ----------
 def handle_report_confirm(uid, u, txt):
     if txt == "نعم ✅":
         pid = u.get("partner")
         try:
+            # دالة review_history_and_penalize قد ترجع نتائج مختلفة حسب implementation
             result = review_history_and_penalize(uid, pid, u.get("history", []))
         except Exception as e:
             print(f"[review_history_and_penalize ERROR] {e}")
             result = None
         update_user(uid, {"state": None})
-        delayed_send(bot, uid, REPORT_OK)
+        safe_delayed_send(uid, REPORT_OK)
         if result:
-            delayed_send(bot, uid, REPORT_RESULT.format(lines=result[0], respect=u.get("respect", "—")))
+            try:
+                safe_delayed_send(uid, REPORT_RESULT.format(lines=result[0], respect=u.get("respect", "—")))
+            except Exception:
+                pass
     elif txt == "لا ❌":
         update_user(uid, {"state": None})
-        delayed_send(bot, uid, "تم الإلغاء. شكراً لحرصك.")
+        safe_delayed_send(uid, "تم الإلغاء. شكراً لحرصك.")
     else:
-        delayed_send(bot, uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
+        safe_delayed_send(uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
         return
 
-    # بعدها أرسل زر المغادرة دائماً
+    # بعدها أرسل زر المغادرة دائمًا (حتى لا تبقى أزرار نعم/لا معلقة)
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     kb.add(KeyboardButton("🚪 مغادرة الدردشة"))
-    delayed_send(bot, uid, "هل تريد الآن مغادرة الدردشة؟", reply_markup=kb)
+    safe_delayed_send(uid, "هل تريد الآن مغادرة الدردشة؟", reply_markup=kb)
 
 # ---------- تمرير الرسائل بين الشركاء ----------
 def handle_chat_message(uid, txt, u):
-    # تأكد من عدم حظر المستخدم
-    if is_muted(uid):
-        safe_delayed_send(uid, MUTED.format(left=60), delay=0.0)
+    # تحقق حالة الحظر/الـ mute
+    muted, left = is_user_muted(uid)
+    if muted:
+        safe_delayed_send(uid, MUTED.format(left=left or 60))
         return
 
     # فلترة كلمات سيئة
     try:
         if contains_bad_word(txt):
             txt_to_send = censor_text(txt)
-            safe_delayed_send(uid, "⚠️ تم تعديل رسالتك لاحتوائها على كلمات غير لائقة.", delay=0.0)
+            safe_delayed_send(uid, "⚠️ تم تعديل رسالتك لاحتوائها على كلمات غير لائقة.")
         else:
             txt_to_send = txt
     except Exception:
         txt_to_send = txt
 
-    # تطبيق نظام الاحترام
+    # تطبيق نظام الاحترام (قد يرجع رسالة إن تطلب الأمر)
     try:
-        apply_respect(uid, txt_to_send)
+        msg = apply_respect(uid, txt_to_send)
+        if msg:
+            safe_delayed_send(uid, msg)
     except Exception:
         pass
 
-    # حفظ السجل
+    # حفظ السجل (بشكل مرن)
     try:
-        append_history(uid, txt_to_send)
+        append_history_safe(uid, txt_to_send)
     except Exception:
         pass
 
-    # ارسال الشريك
+    # إرسال للشريك
     pid = u.get("partner")
     if not pid or pid not in users:
         update_user(uid, {"partner": None})
-        safe_delayed_send(uid, "لا يوجد شريك حالي — عد إلى القائمة.", delay=0.0, reply_markup=main_menu(in_chat=False))
+        safe_delayed_send(uid, "لا يوجد شريك حالي — عد إلى القائمة.", reply_markup=main_menu(in_chat=False))
         return
 
     try:
         bot.send_message(pid, f"💬 {txt_to_send}")
     except Exception as e:
         print(f"[SEND TO PARTNER ERROR] {e}")
-        safe_delayed_send(uid, "حدث خطأ أثناء إرسال الرسالة إلى الشريك.", delay=0.0)
+        safe_delayed_send(uid, "حدث خطأ أثناء إرسال الرسالة إلى الشريك.")
 
 # ---------- Webhook endpoint ----------
 @app.route(f"/{getattr(config, 'WEBHOOK_PATH', 'webhook')}", methods=["POST"])
