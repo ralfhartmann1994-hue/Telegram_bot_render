@@ -1,15 +1,21 @@
-import time
+# messages.py (استبدال دالة delayed_send الحالية)
 import random
+import time
 
-# messages.py
-def delayed_send(bot, chat_id, text, **kwargs):
+def delayed_send(bot, chat_id, text, delay=None, **kwargs):
     """
-    Webhook-safe: إرسال فوري بدون sleep، مع طباعة خطأ إذا فشل.
+    Webhook-safe: نقبل delay للتماشي مع استدعاءات قديمة،
+    لكن لا نمرِّر delay إلى bot.send_message لأن هذه الدالة لا تقبله.
+    كما نعالج الأخطاء ونطبع لوج واضح.
     """
+    # لا تمرّر delay إلى send_message
+    if 'delay' in kwargs:
+        kwargs.pop('delay', None)
     try:
+        # لاحظ: لا نقوم بـ time.sleep هنا (ويبهوك يجب أن يرد بسرعة).
         bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
-        print(f"[SEND_MESSAGE ERROR] {e} | text: {text}")
+        print(f"[SEND_MESSAGE ERROR] {e} | chat_id={chat_id} | text_preview={str(text)[:120]}")
         
 # ============ رسائل البداية / ستارت ============
 START_MESSAGES = [
