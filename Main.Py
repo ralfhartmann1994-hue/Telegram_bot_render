@@ -120,15 +120,17 @@ def safe_delayed_send(uid, text, delay=0.0, **kwargs):
 @bot.message_handler(commands=["start"])
 def cmd_start(m: Message):
     uid = m.from_user.id
-    ensure_user(uid)
+    ensure_user(uid)  
     print(f"[START] user={uid}")
 
-    # رسالة ترحيب عشوائية
-    safe_delayed_send(uid, get_welcome_message("START"), reply_markup=ReplyKeyboardRemove())
+    # رسالة ترحيب مباشرة
+    bot.send_message(uid, "🎉 أهلاً بك! هذا اختبار مباشر للرد من البوت.")
 
-    # طلب الاسم لأول مرة
-    update_user(uid, {"state": STATE_REGISTER_NAME})
-    safe_delayed_send(uid, "✏️ ما اسمك؟", reply_markup=ReplyKeyboardRemove())
+    # عرض كيبورد لاختيار الجنس (بدون delayed_send)
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    kb.add(*[KeyboardButton(g) for g in config.GENDERS])
+    update_user(uid, {"state": STATE_AWAIT_NAME})  # أول خطوة: الاسم
+    bot.send_message(uid, "💡 ما اسمك؟", reply_markup=kb)
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
