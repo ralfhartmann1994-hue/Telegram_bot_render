@@ -235,17 +235,27 @@ def on_text(m: Message):
 def handle_gender(uid, txt):
     txt = txt.strip()
     if txt not in config.GENDERS:
-        delayed_send(bot, uid, "❌ اختر: ذكر / أنثى", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True).add(*[KeyboardButton(g) for g in config.GENDERS]))
+        delayed_send(
+            bot,
+            uid,
+            "❌ اختر: ذكر / أنثى",
+            reply_markup=ReplyKeyboardMarkup(
+                resize_keyboard=True,
+                one_time_keyboard=True
+            ).add(*[KeyboardButton(g) for g in config.GENDERS])
+        )
         return
 
+    # حفظ الجنس وتغيير الحالة إلى انتظار العمر
     update_user(uid, {"gender": txt, "state": STATE_AWAIT_AGE})
-safe_delayed_send(uid, f"✅ تم حفظ الجنس: {txt}")
 
-# اسأل عن العمر بعد اختيار الجنس
-safe_delayed_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
+    # أرسل رسالة تأكيدية
+    safe_delayed_send(uid, f"✅ تم حفظ الجنس: {txt}")
 
-    # بعد الحفظ: وجه المستخدم لبدء البحث أو اختيار الموضوع إذا أردت فوراً
-    # مثال: نتركه يضغط 🔍 البحث عن دردشة من القائمة
+    # اسأل عن العمر بعد اختيار الجنس
+    safe_delayed_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
+
+    # وجه المستخدم لاحقًا للبدء بالبحث أو اختيار الموضوع
     delayed_send(bot, uid, "يمكنك الآن الضغط على 🔍 البحث عن دردشة لبدء.", reply_markup=main_menu(in_chat=False))
 
 #-------- معالجة الاسم -----------
