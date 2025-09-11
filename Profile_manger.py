@@ -40,14 +40,22 @@ def start_history(u):
     u["chat_started_at"] = int(time.time())
     save_users()
 
-def append_history(u1, u2, from_id: int, text: str):
-    rec = {"ts": int(time.time()), "from": from_id, "text": text}
-    for u in (u1, u2):
-        h = u.get("history") or []
-        h.append(rec)
-        if len(h) > 50:
-            del h[:-50]
-        u["history"] = h
+def append_history(sender_uid: int, text: str):
+    u = users.get(sender_uid)
+    if not u:
+        return
+    partner_id = u.get("partner")
+    rec = {"ts": int(time.time()), "from": sender_uid, "text": text}
+    # اضف للمرسل
+    h = u.get("history", [])
+    h.append(rec)
+    u["history"] = h[-50:]
+    # اضف للشريك إذا موجود
+    if partner_id and partner_id in users:
+        p = users[partner_id]
+        ph = p.get("history", [])
+        ph.append(rec)
+        p["history"] = ph[-50:]
     save_users()
 
 def end_session(u1, u2):
