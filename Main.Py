@@ -143,18 +143,15 @@ def _topic_key(topic_text: str) -> str:
 @bot.message_handler(commands=["start"])
 def cmd_start(m: Message):
     uid = m.from_user.id
-    ensure_user(uid)  # مهم جدًا
+    ensure_user(uid)
     print(f"[START] user={uid}")
 
-    # رسالة ترحيب عشوائية
-    welcome_text = get_welcome_message("START")
-    delayed_send(bot, uid, welcome_text, reply_markup=ReplyKeyboardRemove())
+    # رسالة ترحيب
+    safe_delayed_send(uid, get_welcome_message("START"), reply_markup=ReplyKeyboardRemove())
 
-    # اسأل عن الجنس باستخدام ReplyKeyboardMarkup (سيُرسل نص "ذكر"/"أنثى")
-    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    kb.add(*[KeyboardButton(g) for g in config.GENDERS])
-    update_user(uid, {"state": "AWAIT_GENDER"})
-    delayed_send(bot, uid, "💡 اختر جنسك (مرة واحدة فقط):", reply_markup=kb)
+    # اسأل عن الاسم أولًا
+    update_user(uid, {"state": STATE_AWAIT_NAME})
+    safe_delayed_send(uid, "✏️ ما اسمك؟", reply_markup=ReplyKeyboardRemove())
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
@@ -202,6 +199,8 @@ def on_text(m: Message):
         handle_leave_confirm(uid, u, txt); return
     if state == STATE_CONFIRM_REPORT:
         handle_report_confirm(uid, u, txt); return
+    if state == STATE_AWAIT_NAME:
+        handle_name_registration(uid, txt); return
 
     # أوامر أزرار ثابتة
     if txt == "👤 ملفي":
@@ -239,12 +238,28 @@ def handle_gender(uid, txt):
         delayed_send(bot, uid, "❌ اختر: ذكر / أنثى", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True).add(*[KeyboardButton(g) for g in config.GENDERS]))
         return
 
-    update_user(uid, {"gender": txt, "state": None})
-    delayed_send(bot, uid, f"✅ تم حفظ الجنس: {txt}", reply_markup=main_menu(in_chat=False))
+    update_user(uid, {"gender": txt, "state": STATE_AWAIT_AGE})
+safe_delayed_send(uid, f"✅ تم حفظ الجنس: {txt}")
+
+# اسأل عن العمر بعد اختيار الجنس
+safe_delayed_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
 
     # بعد الحفظ: وجه المستخدم لبدء البحث أو اختيار الموضوع إذا أردت فوراً
     # مثال: نتركه يضغط 🔍 البحث عن دردشة من القائمة
     delayed_send(bot, uid, "يمكنك الآن الضغط على 🔍 البحث عن دردشة لبدء.", reply_markup=main_menu(in_chat=False))
+
+#-------- معالجة الاسم -----------
+def handle_name_registration(uid, txt):
+    name = sanitize_name(txt)
+    if not (2 <= len(name) <= 30):
+        safe_delayed_send(uid, "❌ الاسم غير صالح، حاول مجددًا:")
+        return
+    update_user(uid, {"name": name, "state": STATE_AWAIT_GENDER})
+
+    # اسأل عن الجنس مع أزرار
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    kb.add(*[KeyboardButton(g) for g in config.GENDERS])
+    safe_delayed_send(uid, "💡 اختر جنسك:", reply_markup=kb) 
 
 # ---------- تعديل الاسم ----------
 def handle_edit_name(uid, txt):
