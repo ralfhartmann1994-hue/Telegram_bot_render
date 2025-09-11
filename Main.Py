@@ -404,23 +404,29 @@ def handle_leave_confirm(uid, u, txt):
 
 # ---------- الإبلاغ ----------
 @bot.callback_query_handler(func=lambda c: c.data in ["report_yes", "report_no"])
-def handle_report_confirm(c):
-    uid = c.from_user.id
-    partner_id = users.get(uid, {}).get("partner")
-
-    if c.data == "report_yes":
-        # سجل البلاغ
-        print(f"[REPORT] user={uid} reported partner={partner_id}")
-        delayed_send(bot, uid, "🚨 تم تسجيل البلاغ بنجاح.")
-
+def handle_report_confirm(uid, u, txt):
+    if txt == "نعم ✅":
+        pid = u.get("partner")
+        try:
+            result = review_history_and_penalize(uid, pid, u.get("history", []))
+        except Exception as e:
+            print(f"[review_history_and_penalize ERROR] {e}")
+            result = None
+        update_user(uid, {"state": None})
+        delayed_send(bot, uid, REPORT_OK)
+        if result:
+            delayed_send(bot, uid, REPORT_RESULT.format(lines=result[0], respect=u.get("respect", "—")))
+    elif txt == "لا ❌":
+        update_user(uid, {"state": None})
+        delayed_send(bot, uid, "تم الإلغاء. شكراً لحرصك.")
     else:
-        delayed_send(bot, uid, "تم إلغاء البلاغ.")
+        delayed_send(bot, uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
+        return
 
-    # بعدها دائماً أرسل زر المغادرة
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🚪 مغادرة الدردشة", callback_data="leave"))
-    delayed_send(bot, uid, "ماذا تريد أن تفعل الآن؟", reply_markup=markup)
-    bot.answer_callback_query(c.id)
+    # بعدها أرسل زر المغادرة دائماً
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    kb.add(KeyboardButton("🚪 مغادرة الدردشة"))
+    delayed_send(bot, uid, "هل تريد الآن مغادرة الدردشة؟", reply_markup=kb)
 
 # ---------- تمرير الرسائل بين الشركاء ----------
 def handle_chat_message(uid, txt, u):
