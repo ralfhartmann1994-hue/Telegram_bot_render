@@ -133,18 +133,23 @@ BANNED = "🚫 حسابك محظور بسبب مخالفات متكررة."
 
 # ============ دالة اختيار رسالة الترحيب ============
 def get_welcome_message(topic=None):
-    """
-    - topic="START" => رسالة عشوائية عند بداية البوت
-    - topic محدد => رسالة عشوائية من الفئة المختارة
-    """
     if topic == "START":
         return random.choice(START_MESSAGES)
+    if not topic:
+        return random.choice(START_MESSAGES)
 
-    topic_map = {
-        "رياضة": FOOTBALL_MESSAGES,
-        "سياسة": POLITICS_MESSAGES,
-        "دين": RELIGION_MESSAGES,
-        "فلسفة": PHILOSOPHY_MESSAGES,
-        "تعارف": SOCIAL_MESSAGES,
-    }
-    return random.choice(topic_map.get(topic, START_MESSAGES))
+    t = topic.lower()
+
+    if "رياض" in t or "⚽" in topic:
+        return random.choice(FOOTBALL_MESSAGES)
+    if "سياس" in t or "🏛" in topic:
+        return random.choice(POLITICS_MESSAGES)
+    if "دين" in t or "🕌" in topic:
+        return random.choice(RELIGION_MESSAGES)
+    if "فلسف" in t or "🎭" in topic:
+        return random.choice(PHILOSOPHY_MESSAGES)
+    if "تعارف" in t or "🤝" in topic:
+        return random.choice(SOCIAL_MESSAGES)
+
+    return random.choice(START_MESSAGES)
+    
