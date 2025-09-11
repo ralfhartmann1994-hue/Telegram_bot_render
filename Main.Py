@@ -141,18 +141,20 @@ def _topic_key(topic_text: str) -> str:
 
 # ---------- /start ----------
 @bot.message_handler(commands=["start"])
-def cmd_start(m):
+def cmd_start(m: Message):
     uid = m.from_user.id
-    ensure_user(uid)  # مهم عشان نسجل المستخدم قبل أي شيء
+    ensure_user(uid)  # مهم جدًا
     print(f"[START] user={uid}")
 
-    text = get_welcome_message("START") + "\n\nاختر جنسك:"
-    markup = types.InlineKeyboardMarkup()
-    markup.add(
-        types.InlineKeyboardButton("👨 رجل", callback_data="male"),
-        types.InlineKeyboardButton("👩 امرأة", callback_data="female")
-    )
-    delayed_send(bot, uid, text, reply_markup=markup)
+    # رسالة ترحيب عشوائية
+    welcome_text = get_welcome_message("START")
+    delayed_send(bot, uid, welcome_text, reply_markup=ReplyKeyboardRemove())
+
+    # اسأل عن الجنس باستخدام ReplyKeyboardMarkup (سيُرسل نص "ذكر"/"أنثى")
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    kb.add(*[KeyboardButton(g) for g in config.GENDERS])
+    update_user(uid, {"state": "AWAIT_GENDER"})
+    delayed_send(bot, uid, "💡 اختر جنسك (مرة واحدة فقط):", reply_markup=kb)
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
@@ -233,18 +235,16 @@ def on_text(m: Message):
 # ---------- معالجة اختيار الجنس ----------
 def handle_gender(uid, txt):
     txt = txt.strip()
-    valid_genders = getattr(config, "GENDERS", ["ذكر", "أنثى"])
-    if txt not in valid_genders:
-        safe_delayed_send(uid, f"❌ اختر: {' / '.join(valid_genders)}", delay=0.0)
+    if txt not in config.GENDERS:
+        delayed_send(bot, uid, "❌ اختر: ذكر / أنثى", reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True).add(*[KeyboardButton(g) for g in config.GENDERS]))
         return
 
-    # حفظ الجنس
-    update_user(uid, {"gender": txt})
+    update_user(uid, {"gender": txt, "state": None})
+    delayed_send(bot, uid, f"✅ تم حفظ الجنس: {txt}", reply_markup=main_menu(in_chat=False))
 
-    # تأكيد ثم توجيه لاختيار الموضوع
-    safe_delayed_send(uid, f"✅ تم حفظ الجنس: {txt}", delay=0.0, reply_markup=ReplyKeyboardRemove())
-    update_user(uid, {"state": STATE_CHOOSE_TOPIC})
-    safe_delayed_send(uid, "💡 الآن اختر موضوع النقاش الذي ترغب فيه:", delay=0.0, reply_markup=topics_menu())
+    # بعد الحفظ: وجه المستخدم لبدء البحث أو اختيار الموضوع إذا أردت فوراً
+    # مثال: نتركه يضغط 🔍 البحث عن دردشة من القائمة
+    delayed_send(bot, uid, "يمكنك الآن الضغط على 🔍 البحث عن دردشة لبدء.", reply_markup=main_menu(in_chat=False))
 
 # ---------- تعديل الاسم ----------
 def handle_edit_name(uid, txt):
