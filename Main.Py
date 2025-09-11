@@ -1,4 +1,3 @@
-# Main.py
 import os
 import time
 import traceback
@@ -11,8 +10,8 @@ from telebot.types import (
     Message,
 )
 
-# ---------- استدعاء الإعدادات والملفات المساندة ----------
-import config  # يجب أن يحتوي على TOKEN, WEBHOOK_URL, WEBHOOK_PATH, PORT, LEAVE_DELAY, TOPICS, GENDERS, TARGET_GENDERS
+# ---------- استدعاء الإعدادات ----------
+import config
 from storage import load_users, save_users, users, ensure_user
 from Profile_manger import (
     sanitize_name,
@@ -43,27 +42,24 @@ from messages import (
     BANNED,
 )
 
-# Bad_word helper (إن وُجد)
+# ---------- فلترة الكلمات السيئة ----------
 try:
     from Bad_word import contains_bad_word, censor_text
 except Exception:
-    def contains_bad_word(text):
-        return False
+    def contains_bad_word(text): return False
+    def censor_text(text): return text
 
-    def censor_text(text):
-        return text
-
-# ---------- إنشاء البوت وفلَسْك ----------
+# ---------- إعداد البوت ----------
 TOKEN = getattr(config, "TOKEN", None) or os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
-    raise RuntimeError("TELEGRAM_TOKEN مفقود. ضعه في config.TOKEN أو كمتغير بيئة TELEGRAM_TOKEN")
-
+    raise RuntimeError("TELEGRAM_TOKEN مفقود")
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 app = Flask(__name__)
 
-# ---------- ثوابت الحالات ----------
+# ---------- الحالات ----------
+STATE_REGISTER_NAME = "REGISTER_NAME"   # اسم جديد أول مرة
 STATE_AWAIT_GENDER = "AWAIT_GENDER"
-STATE_AWAIT_NAME = "AWAIT_NAME"
+STATE_AWAIT_NAME = "AWAIT_NAME"         # تعديل اسم
 STATE_AWAIT_AGE = "AWAIT_AGE"
 STATE_CHOOSE_TOPIC = "CHOOSE_TOPIC"
 STATE_CHOOSE_TARGET_GENDER = "CHOOSE_TARGET_GENDER"
@@ -71,7 +67,7 @@ STATE_SEARCHING = "SEARCHING"
 STATE_CONFIRM_LEAVE = "CONFIRM_LEAVE"
 STATE_CONFIRM_REPORT = "CONFIRM_REPORT"
 
-# ---------- كيبوردات مساعدة ----------
+# ---------- كيبوردات ----------
 def main_menu(in_chat: bool = False) -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("👤 ملفي"))
@@ -95,7 +91,6 @@ def target_gender_menu() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     for tg in getattr(config, "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"]):
         kb.add(KeyboardButton(tg))
-    kb.add(KeyboardButton("أي"))
     return kb
 
 def yes_no_menu() -> ReplyKeyboardMarkup:
@@ -103,70 +98,25 @@ def yes_no_menu() -> ReplyKeyboardMarkup:
     kb.add(KeyboardButton("نعم ✅"), KeyboardButton("لا ❌"))
     return kb
 
-# ---------- تحميل/حفظ المستخدمين ----------
+# ---------- تحميل المستخدمين ----------
 load_users()
 
-# ---------- تحديث مستخدم آمن + حفظ ----------
 def update_user(uid, updates: dict):
     ensure_user(uid)
     users[uid].update(updates)
+    try: save_users()
+    except Exception as e: print(f"[SAVE USER ERROR] {e}")
+
+# ---------- إرسال آمن ----------
+def safe_delayed_send(uid, text, delay=0.0, **kwargs):
     try:
-        save_users()
+        delayed_send(bot, uid, text, delay=delay, **kwargs)
     except Exception as e:
-        print(f"[SAVE USER ERROR] {e}")
+        print(f"[SEND ERROR] {e} | text={text}")
+        try: bot.send_message(uid, text, **{k:v for k,v in kwargs.items() if k!="delay"})
+        except: pass
 
-# ---------- غلاف إرسال آمن (يتجنّب تمرير 'delay' إلى bot.send_message) ----------
-def safe_delayed_send(uid, text, delay: float = 0.0, **kwargs):
-    """
-    إرسال آمن: إن كان هناك تأخير نطبقه قبل الإرسال،
-    ثم نستعمل bot.send_message مباشرة (بدون تمرير باراميتر 'delay' إلى bot).
-    """
-    try:
-        if delay and isinstance(delay, (int, float)) and delay > 0:
-            time.sleep(delay)
-        bot.send_message(uid, text, **kwargs)
-    except Exception as e:
-        print(f"[SEND_MESSAGE ERROR] {e} | text: {text}")
-
-# ---------- تغليف للتعامل مع append_history بتواقيع مختلفة ----------
-def append_history_safe(uid, text):
-    try:
-        # أسهل توقيع (إذا كانت دالتك تقبل (uid, text))
-        append_history(uid, text)
-    except TypeError:
-        # محاولة شكل آخر (إذا كانت append_history تقبل user-objects)
-        try:
-            pid = users[uid].get("partner")
-            if pid and pid in users:
-                append_history(users[uid], users[pid], uid, text)
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-# ---------- تغليف للتعامل مع is_muted بتواقيع مختلفة ----------
-def is_user_muted(uid):
-    """يعيد (muted_bool, seconds_left_or_None)"""
-    try:
-        res = is_muted(users[uid])  # بعض الإصدارات تتوقع user object
-    except Exception:
-        try:
-            res = is_muted(uid)  # أو قد تتوقع uid
-        except Exception:
-            return (False, None)
-    # ممكن أن يرجع tuple أو boolean
-    if isinstance(res, tuple):
-        return res
-    return (bool(res), None)
-
-# ---------- دوال مساعدة صغيرة ----------
-def _topic_key(topic_text: str) -> str:
-    if not topic_text:
-        return ""
-    parts = topic_text.split()
-    return parts[-1] if parts else topic_text
-
-# ---------- /start: الآن يتبع التسلسل: اسم -> جنس -> عمر -> القائمة ----------
+# ---------- /start ----------
 @bot.message_handler(commands=["start"])
 def cmd_start(m: Message):
     uid = m.from_user.id
@@ -176,142 +126,111 @@ def cmd_start(m: Message):
     # رسالة ترحيب عشوائية
     safe_delayed_send(uid, get_welcome_message("START"), reply_markup=ReplyKeyboardRemove())
 
-    # 1) اسأل عن الاسم أولًا
-    update_user(uid, {"state": STATE_AWAIT_NAME})
-    safe_delayed_send(uid, "✏️ ما اسمك؟ (2–30 حرفاً)", reply_markup=ReplyKeyboardRemove())
+    # طلب الاسم لأول مرة
+    update_user(uid, {"state": STATE_REGISTER_NAME})
+    safe_delayed_send(uid, "✏️ ما اسمك؟", reply_markup=ReplyKeyboardRemove())
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
 def cmd_help(m: Message):
     uid = m.from_user.id
     ensure_user(uid)
-    if users[uid].get("banned_full"):
-        return
-    safe_delayed_send(uid, HELP, reply_markup=main_menu(in_chat=bool(users[uid].get("partner"))))
+    if users[uid].get("banned_full"): return
+    safe_delayed_send(uid, HELP, delay=0.0,
+        reply_markup=main_menu(in_chat=bool(users[uid].get("partner"))))
 
-# ---------- اختبار ping ----------
+# ---------- ping ----------
 @bot.message_handler(commands=["ping"])
 def cmd_ping(m: Message):
-    try:
-        cid = m.chat.id
-        print(f"[DEBUG] ping from {cid}")
-        bot.send_message(cid, "pong")
-    except Exception as e:
-        print(f"[ERROR] ping handler: {e}")
+    bot.send_message(m.chat.id, "pong")
 
-# ---------- المعالجة العامة للرسائل النصية ----------
+# ---------- on_text ----------
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
 def on_text(m: Message):
     uid = m.from_user.id
     txt = (m.text or "").strip()
     ensure_user(uid)
     u = users[uid]
-    if u.get("banned_full"):
-        return
+    if u.get("banned_full"): return
 
     state = u.get("state") or ""
 
-    # حالات انتظار منطقية (الاسم/الجنس/العمر...)
+    # تسجيل أول اسم
+    if state == STATE_REGISTER_NAME:
+        handle_name_registration(uid, txt); return
+    # تعديل اسم
+    if state == STATE_AWAIT_NAME:
+        handle_edit_name(uid, txt); return
     if state == STATE_AWAIT_GENDER:
         handle_gender(uid, txt); return
-
-    if state == STATE_AWAIT_NAME:
-        # لو المستخدم لديه اسم سابقًا، فهذه حالة "تعديل الاسم"
-        if u.get("name"):
-            handle_edit_name(uid, txt); return
-        else:
-            handle_name_registration(uid, txt); return
-
     if state == STATE_AWAIT_AGE:
         handle_edit_age(uid, txt); return
-
     if state == STATE_CHOOSE_TOPIC:
         handle_topic_selection(uid, txt); return
-
     if state == STATE_CHOOSE_TARGET_GENDER:
         handle_target_gender(uid, txt); return
-
     if state == STATE_CONFIRM_LEAVE:
         handle_leave_confirm(uid, u, txt); return
-
     if state == STATE_CONFIRM_REPORT:
         handle_report_confirm(uid, u, txt); return
 
-    # أوامر أزرار ثابتة
+    # الأزرار
     if txt == "👤 ملفي":
-        safe_delayed_send(uid, profile_text(u), reply_markup=main_menu(in_chat=bool(u.get("partner"))))
-        return
-
+        safe_delayed_send(uid, profile_text(u), reply_markup=main_menu(in_chat=bool(u.get("partner")))); return
     if txt == "✏️ تعديل الاسم":
         update_user(uid, {"state": STATE_AWAIT_NAME})
-        safe_delayed_send(uid, "أدخل الاسم الجديد:", reply_markup=ReplyKeyboardRemove())
-        return
-
+        safe_delayed_send(uid, "أدخل الاسم الجديد:", reply_markup=ReplyKeyboardRemove()); return
     if txt == "🎂 تعديل العمر":
         update_user(uid, {"state": STATE_AWAIT_AGE})
-        safe_delayed_send(uid, "أدخل العمر الجديد (10–120):", reply_markup=ReplyKeyboardRemove())
-        return
-
+        safe_delayed_send(uid, "أدخل العمر الجديد (10–120):", reply_markup=ReplyKeyboardRemove()); return
     if txt == "🆘 مساعدة":
-        safe_delayed_send(uid, HELP, reply_markup=main_menu(in_chat=bool(u.get("partner"))))
-        return
-
+        safe_delayed_send(uid, HELP, reply_markup=main_menu(in_chat=bool(u.get("partner")))); return
     if txt == "🔍 البحث عن دردشة":
         handle_search_request(uid); return
 
-    # إذا المستخدم في دردشة (partner موجود)، فمرّر الرسائل للشريك
+    # إذا في محادثة
     if u.get("partner"):
         handle_chat_message(uid, txt, u); return
 
-    # Default
+    # غير مفهوم
     safe_delayed_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", reply_markup=main_menu(in_chat=False))
 
-# ---------- معالجة اختيار/حفظ الجنس ----------
+# ---------- اسم أول مرة ----------
+def handle_name_registration(uid, txt):
+    name = sanitize_name(txt)
+    if not (2 <= len(name) <= 30):
+        safe_delayed_send(uid, "❌ الاسم غير صالح، حاول مجددًا:"); return
+    update_user(uid, {"name": name, "state": STATE_AWAIT_GENDER})
+
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    kb.add(*[KeyboardButton(g) for g in config.GENDERS])
+    safe_delayed_send(uid, "💡 اختر جنسك:", reply_markup=kb)
+
+# ---------- تعديل الاسم ----------
+def handle_edit_name(uid, txt):
+    name = sanitize_name(txt)
+    update_user(uid, {"name": name, "state": None})
+    safe_delayed_send(uid, f"✅ تم تحديث الاسم إلى: {name}", reply_markup=main_menu(False))
+
+# ---------- الجنس ----------
 def handle_gender(uid, txt):
-    txt = txt.strip()
     if txt not in config.GENDERS:
         kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         kb.add(*[KeyboardButton(g) for g in config.GENDERS])
-        safe_delayed_send(uid, "❌ اختر: ذكر / أنثى", reply_markup=kb)
-        return
-
-    # حفظ الجنس والانتقال لطلب العمر
+        safe_delayed_send(uid, "❌ اختر: ذكر / أنثى", reply_markup=kb); return
     update_user(uid, {"gender": txt, "state": STATE_AWAIT_AGE})
     safe_delayed_send(uid, f"✅ تم حفظ الجنس: {txt}")
-    # نطلب العمر بعد الجنس
     safe_delayed_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
 
-# ---------- معالجة تسجيل الاسم (الذي يأتي مباشرة بعد /start) ----------
-def handle_name_registration(uid, txt):
-    name = sanitize_name(txt)
-    if not name:
-        safe_delayed_send(uid, "❌ الاسم غير صالح — يجب أن يحتوي حروفًا فقط ويكون 2–30 حرفاً. حاول مجدداً:")
-        return
-    update_user(uid, {"name": name, "state": STATE_AWAIT_GENDER})
-    # اسأل عن الجنس مع أزرار
-    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    kb.add(*[KeyboardButton(g) for g in config.GENDERS])
-    safe_delayed_send(uid, f"✅ تم حفظ الاسم: {name}")
-    safe_delayed_send(uid, "💡 اختر جنسك (مرة واحدة فقط):", reply_markup=kb)
-
-# ---------- تعديل الاسم (يُستدعى أيضاً عندما يضغط المستخدم ✏️ تعديل الاسم) ----------
-def handle_edit_name(uid, txt):
-    name = sanitize_name(txt)
-    if not name:
-        safe_delayed_send(uid, "❌ الاسم غير صالح — حاول مجدداً:")
-        return
-    update_user(uid, {"name": name, "state": None})
-    safe_delayed_send(uid, f"✅ تم تحديث الاسم إلى: {name}", reply_markup=main_menu(in_chat=False))
-
-# ---------- تعديل/حفظ العمر ----------
+# ---------- العمر ----------
 def handle_edit_age(uid, txt):
     age = sanitize_age(txt)
     if not age:
-        safe_delayed_send(uid, "❌ العمر غير صالح. أرسل رقمًا بين 10 و120.", reply_markup=ReplyKeyboardRemove())
-        return
-    # بعد حفظ العمر ننهي التسجيل (إن كان تسجيلًا جديدًا) ونُعيد القائمة الرئيسية
+        safe_delayed_send(uid, "❌ العمر غير صالح. أرسل رقمًا بين 10 و120."); return
     update_user(uid, {"age": age, "state": None})
-    safe_delayed_send(uid, f"✅ تم حفظ العمر: {age}", reply_markup=main_menu(in_chat=False))
+    safe_delayed_send(uid, f"✅ تم حفظ العمر: {age}", reply_markup=main_menu(False))
+
+# ---------- ... باقي الدوال (البحث، التطابق، مغادرة، إلخ) تبقى كما هي ----------
 
 # ---------- بدء البحث عن دردشة (يعرض قائمة المواضيع) ----------
 def handle_search_request(uid):
