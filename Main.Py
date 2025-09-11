@@ -125,12 +125,18 @@ def cmd_start(m: Message):
     ensure_user(uid)
     print(f"[START] user={uid}")
 
-    # رسالة ترحيب عشوائية (من messages.get_welcome_message)
-    safe_send(uid, get_welcome_message("START"), reply_markup=ReplyKeyboardRemove())
+    # رسالة ترحيب مباشرة
+    try:
+        bot.send_message(uid, get_welcome_message("START"))
+    except Exception as e:
+        print(f"[START SEND ERROR] {e}")
 
-    # ابدأ عملية التسجيل: نطلب الاسم أولاً
-    update_user(uid, {"state": STATE_REGISTER_NAME})
-    safe_send(uid, "✏️ ما اسمك؟ (أدخل الاسم من لوحة الكتابة)", reply_markup=ReplyKeyboardRemove())
+    # اسأل عن الاسم أولًا مباشرة بعد الترحيب
+    update_user(uid, {"state": STATE_AWAIT_NAME})
+    try:
+        bot.send_message(uid, "✏️ ما اسمك؟")  # بدون ReplyKeyboardRemove أو delay
+    except Exception as e:
+        print(f"[ASK NAME ERROR] {e}")
 
 # ---------- /help ----------
 @bot.message_handler(commands=["help"])
