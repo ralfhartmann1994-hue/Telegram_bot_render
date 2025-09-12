@@ -23,8 +23,8 @@ import storage
 from storage import users, load_users, save_users, ensure_user as storage_ensure_user
 
 # ملف إدارة البروفايل (النسخة التي طلبتَها)
-import profile as ProfileManager
-from profile import (
+import Profile_manger as ProfileManager
+from Profile_manger import (
     ensure_user,
     set_user_name,
     set_user_age,
