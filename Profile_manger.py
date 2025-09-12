@@ -1,6 +1,9 @@
-# Profile_manger.py
+
+# =================
+# Profile_manger.py (مصحح)
+# =================
 import storage
-from storage import ensure_user as ensure_user_storage, update_user_dict, append_history
+from storage import ensure_user as ensure_user_storage, update_user_dict, append_history, save_users
 import re
 
 # Regex للأسماء (يمكن تعديل Unicode لاحقًا)
@@ -12,6 +15,7 @@ def ensure_user(uid: int):
 def set_name(user_id, name):
     storage.users.setdefault(user_id, {})
     storage.users[user_id]["name"] = name
+    save_users()  # حفظ البيانات فوراً
 
 def get_name(user_id):
     return storage.users.get(user_id, {}).get("name")
@@ -19,6 +23,7 @@ def get_name(user_id):
 def set_gender(user_id, gender):
     storage.users.setdefault(user_id, {})
     storage.users[user_id]["gender"] = gender
+    save_users()  # حفظ البيانات فوراً
 
 def get_gender(user_id):
     return storage.users.get(user_id, {}).get("gender")
@@ -26,6 +31,7 @@ def get_gender(user_id):
 def set_age(user_id, age):
     storage.users.setdefault(user_id, {})
     storage.users[user_id]["age"] = age
+    save_users()  # حفظ البيانات فوراً
 
 def get_age(user_id):
     return storage.users.get(user_id, {}).get("age")
@@ -48,5 +54,6 @@ def end_session(u1: dict, u2: dict=None):
         if u2:
             u2["partner"] = None
             u2["chat_started_at"] = None
+        save_users()
     except Exception:
-        pass 
+        pass
