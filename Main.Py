@@ -163,63 +163,32 @@ def partner_profile_text(pid: int):
 
 # معالجات الأوامر
 @bot.message_handler(commands=['start'])
-def cmd_start(message):
-    bot.send_message(
-        message.chat.id,
-        messages.WELCOME_MESSAGE
-    )
-    bot.send_message(
-        message.chat.id,
-        messages.ASK_NAME
-    )
-    bot.register_next_step_handler(message, process_name)
+def cmd_start(message: Message):
+    uid = message.from_user.id
+    # التأكد من وجود المستخدم في قاعدة البيانات
+    u = ensure_user_extended(uid)
 
-# ---------- الاسم ----------
-def process_name(message):
-    name = message.text.strip()
-    if not name or len(name) < 2:
-        bot.send_message(message.chat.id, "❌ الاسم غير صالح، جرب مرة أخرى:")
-        bot.register_next_step_handler(message, process_name)
-        return
+    # إذا كان المستخدم جديدًا أو لم يُسجل اسمه
+    if not u.get("name"):
+        # إرسال الستكر الترحيبي العام
+        try:
+            bot.send_sticker(uid, STICKERS.get("welcome_general"))
+        except Exception:
+            pass
 
-    ProfileManager.set_name(message.from_user.id, name)
+        # إرسال رسالة ترحيبية عشوائية
+        safe_send(uid, get_welcome_message("START"))
 
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(KeyboardButton("ذكر"), KeyboardButton("أنثى"))
+        # بدء خطوة التسجيل بالاسم
+        update_user(uid, {"state": STATE_REGISTER_NAME})
+        safe_send(uid, "💡 لنبدأ بإنشاء ملفك الشخصي.\nما هو اسمك؟")
 
-    bot.send_message(
-        message.chat.id,
-        messages.ASK_GENDER,
-        reply_markup=markup
-    )
-    bot.register_next_step_handler(message, process_gender)
+        # تسجيل المعالج للاسم
+        bot.register_next_step_handler(message, handle_register_name)
 
-# ---------- الجنس ----------
-def process_gender(message):
-    gender = message.text.strip()
-    if gender not in ["ذكر", "أنثى"]:
-        bot.send_message(message.chat.id, "❌ اختر ذكر أو أنثى فقط:")
-        bot.register_next_step_handler(message, process_gender)
-        return
-
-    ProfileManager.set_gender(message.from_user.id, gender)
-
-    bot.send_message(message.chat.id, messages.ASK_AGE)
-    bot.register_next_step_handler(message, process_age)
-
-# ---------- العمر ----------
-def process_age(message):
-    try:
-        age = int(message.text.strip())
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ من فضلك أدخل العمر كرقم:")
-        bot.register_next_step_handler(message, process_age)
-        return
-
-    if age < 10 or age > 100:
-        bot.send_message(message.chat.id, "❌ العمر غير منطقي، حاول مرة أخرى:")
-        bot.register_next_step_handler(message, process_age)
-        return
+    else:
+        # المستخدم قديم، نرحب به مع قائمة رئيسية
+        safe_send(uid, f"👋 مرحبًا مجددًا، {u.get('name')}!", reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
     ProfileManager.set_age(message.from_user.id, age)
 
@@ -344,57 +313,93 @@ def on_text(m: Message):
     # افتراضي
     safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", reply_markup=main_menu(in_chat=False))
 
-# دوال التسجيل خطوة بخطوة
-def handle_register_name(uid: int, txt: str):
+# ---------- التسجيل خطوة بخطوة ----------
+
+def handle_register_name(message: Message):
+    uid = message.from_user.id
+    txt = (message.text or "").strip()
+
+    if len(txt) < 2 or len(txt) > 30:
+        safe_send(uid, "❌ الاسم غير صالح، استخدم 2–30 حرفًا. حاول مرة أخرى:")
+        bot.register_next_step_handler(message, handle_register_name)
+        return
+
+    # حفظ الاسم
     try:
-        ok = ProfileManager.set_user_name(uid, txt)
-        if not ok:
-            safe_send(uid, "❌ الاسم غير صالح. استخدم 2–30 حرفًا (حروف ومسافات فقط). حاول مرة أخرى:")
-            return
+        ProfileManager.set_name(uid, txt)
         update_user(uid, {"state": STATE_REGISTER_GENDER})
-        safe_send(uid, f"✅ تم حفظ الاسم: {users[uid].get('name')}")
-        # ستيكر بعد إدخال الاسم
-        try:
-            bot.send_sticker(uid, STICKERS.get("after_name"))
-        except Exception:
-            pass
-        safe_send(uid, "💡 اختر جنسك (مرة واحدة):", reply_markup=gender_menu())
     except Exception as e:
         print(f"[handle_register_name ERROR] {e}")
-        print(traceback.format_exc())
-        safe_send(uid, "❌ حدث خطأ أثناء حفظ الاسم. حاول مرة أخرى.")
+        safe_send(uid, "❌ حدث خطأ أثناء حفظ الاسم. حاول مرة أخرى:")
+        bot.register_next_step_handler(message, handle_register_name)
+        return
 
-def handle_register_gender(uid: int, txt: str):
+    # إرسال ستيكر بعد الاسم
     try:
-        txt = txt.strip()
-        valid = getattr(config, "GENDERS", ["ذكر", "أنثى"])
-        if txt not in valid:
-            safe_send(uid, "❌ اختر: ذكر / أنثى", reply_markup=gender_menu())
-            return
-        ok = ProfileManager.set_user_gender(uid, txt)
-        if not ok:
-            safe_send(uid, "❌ اختيار غير صالح. اختر: ذكر / أنثى", reply_markup=gender_menu())
-            return
+        bot.send_sticker(uid, STICKERS.get("after_name"))
+    except Exception:
+        pass
+
+    # طلب اختيار الجنس
+    safe_send(uid, "💡 اختر جنسك:", reply_markup=gender_menu())
+    bot.register_next_step_handler(message, handle_register_gender)
+
+
+def handle_register_gender(message: Message):
+    uid = message.from_user.id
+    txt = (message.text or "").strip()
+
+    valid_genders = getattr(config, "GENDERS", ["ذكر", "أنثى"])
+    if txt not in valid_genders:
+        safe_send(uid, f"❌ اختر جنسًا صالحًا: {' / '.join(valid_genders)}", reply_markup=gender_menu())
+        bot.register_next_step_handler(message, handle_register_gender)
+        return
+
+    try:
+        ProfileManager.set_gender(uid, txt)
         update_user(uid, {"state": STATE_REGISTER_AGE})
-        safe_send(uid, f"✅ تم حفظ الجنس: {txt}")
-        safe_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         print(f"[handle_register_gender ERROR] {e}")
-        print(traceback.format_exc())
-        safe_send(uid, "❌ حدث خطأ أثناء حفظ الجنس. حاول مرة أخرى.")
+        safe_send(uid, "❌ حدث خطأ أثناء حفظ الجنس. حاول مرة أخرى:")
+        bot.register_next_step_handler(message, handle_register_gender)
+        return
 
-def handle_register_age(uid: int, txt: str):
+    # إرسال رسالة طلب العمر
+    safe_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
+    bot.register_next_step_handler(message, handle_register_age)
+
+
+def handle_register_age(message: Message):
+    uid = message.from_user.id
+    txt = (message.text or "").strip()
     try:
-        ok = ProfileManager.set_user_age(uid, txt)
-        if not ok:
-            safe_send(uid, "❌ العمر غير صالح. أرسل رقمًا بين 10 و120:")
-            return
+        age = int(txt)
+    except ValueError:
+        safe_send(uid, "❌ من فضلك أدخل العمر كرقم بين 10 و120:")
+        bot.register_next_step_handler(message, handle_register_age)
+        return
+
+    if age < 10 or age > 120:
+        safe_send(uid, "❌ العمر غير منطقي. حاول مرة أخرى (10–120):")
+        bot.register_next_step_handler(message, handle_register_age)
+        return
+
+    try:
+        ProfileManager.set_age(uid, age)
         update_user(uid, {"state": None})
-        safe_send(uid, f"✅ تم حفظ العمر: {users[uid].get('age')}")
-        safe_send(uid, "🎉 تم إعداد ملفك الشخصي بنجاح! يمكنك الآن استخدام القائمة:", reply_markup=main_menu(in_chat=False))
     except Exception as e:
         print(f"[handle_register_age ERROR] {e}")
-        print(traceback.format_exc())
+        safe_send(uid, "❌ حدث خطأ أثناء حفظ العمر. حاول مرة أخرى:")
+        bot.register_next_step_handler(message, handle_register_age)
+        return
+
+    # إرسال تأكيد حفظ الملف الشخصي
+    u = storage.users.get(uid, {})
+    safe_send(uid, PROFILE_SAVED.format(
+        name=u.get("name"),
+        gender=u.get("gender"),
+        age=u.get("age")
+    ), reply_markup=main_menu(in_chat=False))
         safe_send(uid, "❌ حدث خطأ أثناء حفظ العمر. حاول مرة أخرى.")
 
 # دوال التعديل
