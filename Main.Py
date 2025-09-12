@@ -162,24 +162,76 @@ def partner_profile_text(pid: int):
         return "معلومات الشريك غير متوفرة."
 
 # معالجات الأوامر
-@bot.message_handler(commands=["start"])
-def cmd_start(m: Message):
-    uid = m.from_user.id
-    ensure_user_extended(uid)
-    print(f"[START] user={uid}")
-    try:
-        wm = get_welcome_message("START")
-        safe_send(uid, wm)
-        # ستيكر ترحيبي عام (حاول إرساله، قد يفشل إذا file_id غير صالح)
-        try:
-            bot.send_sticker(uid, STICKERS.get("welcome_general"))
-        except Exception:
-            pass
-    except Exception as e:
-        print(f"[WELCOME SEND ERROR] {e}")
-    update_user(uid, {"state": STATE_REGISTER_NAME})
-    safe_send(uid, "✏️ ما اسمك؟", reply_markup=ReplyKeyboardRemove())
+@bot.message_handler(commands=['start'])
+def cmd_start(message):
+    bot.send_message(
+        message.chat.id,
+        messages.WELCOME_MESSAGE
+    )
+    bot.send_message(
+        message.chat.id,
+        messages.ASK_NAME
+    )
+    bot.register_next_step_handler(message, process_name)
 
+# ---------- الاسم ----------
+def process_name(message):
+    name = message.text.strip()
+    if not name or len(name) < 2:
+        bot.send_message(message.chat.id, "❌ الاسم غير صالح، جرب مرة أخرى:")
+        bot.register_next_step_handler(message, process_name)
+        return
+
+    ProfileManager.set_name(message.from_user.id, name)
+
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(KeyboardButton("ذكر"), KeyboardButton("أنثى"))
+
+    bot.send_message(
+        message.chat.id,
+        messages.ASK_GENDER,
+        reply_markup=markup
+    )
+    bot.register_next_step_handler(message, process_gender)
+
+# ---------- الجنس ----------
+def process_gender(message):
+    gender = message.text.strip()
+    if gender not in ["ذكر", "أنثى"]:
+        bot.send_message(message.chat.id, "❌ اختر ذكر أو أنثى فقط:")
+        bot.register_next_step_handler(message, process_gender)
+        return
+
+    ProfileManager.set_gender(message.from_user.id, gender)
+
+    bot.send_message(message.chat.id, messages.ASK_AGE)
+    bot.register_next_step_handler(message, process_age)
+
+# ---------- العمر ----------
+def process_age(message):
+    try:
+        age = int(message.text.strip())
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ من فضلك أدخل العمر كرقم:")
+        bot.register_next_step_handler(message, process_age)
+        return
+
+    if age < 10 or age > 100:
+        bot.send_message(message.chat.id, "❌ العمر غير منطقي، حاول مرة أخرى:")
+        bot.register_next_step_handler(message, process_age)
+        return
+
+    ProfileManager.set_age(message.from_user.id, age)
+
+    bot.send_message(
+        message.chat.id,
+        messages.PROFILE_SAVED.format(
+            name=ProfileManager.get_name(message.from_user.id),
+            gender=ProfileManager.get_gender(message.from_user.id),
+            age=ProfileManager.get_age(message.from_user.id)
+        ),
+        reply_markup=None
+    )
 @bot.message_handler(commands=["profile"])
 def cmd_profile(m: Message):
     uid = m.from_user.id
