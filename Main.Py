@@ -394,13 +394,12 @@ def handle_register_age(message: Message):
         return
 
     # إرسال تأكيد حفظ الملف الشخصي
-    u = storage.users.get(uid, {})
-    safe_send(uid, PROFILE_SAVED.format(
-        name=u.get("name"),
-        gender=u.get("gender"),
-        age=u.get("age")
-    ), reply_markup=main_menu(in_chat=False))
-        safe_send(uid, "❌ حدث خطأ أثناء حفظ العمر. حاول مرة أخرى.")
+u = storage.users.get(uid, {})
+safe_send(uid, PROFILE_SAVED.format(
+    name=u.get("name"),
+    gender=u.get("gender"),
+    age=u.get("age")
+), reply_markup=main_menu(in_chat=False))
 
 # دوال التعديل
 def handle_edit_name(uid: int, txt: str):
