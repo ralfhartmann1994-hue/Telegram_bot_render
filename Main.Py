@@ -1,4 +1,6 @@
-# Main.py
+# =================
+# Main.py (مصحح بالكامل)
+# =================
 import os
 import time
 import traceback
@@ -9,7 +11,11 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 
 # استيراد إعدادات ورسائل وستيكرات
 config = importlib.import_module("config")
-from messages import delayed_send, get_welcome_message, WELCOME, HELP, SEARCHING, NO_MATCH, INTRO_PARTNER, LEAVE_CONFIRM, LEAVE_TOO_SOON, LEFT_YOU, LEFT_PARTNER, REPORT_CONFIRM, REPORT_OK, REPORT_RESULT, MUTED, BANNED
+from messages import (
+    delayed_send, get_welcome_message, WELCOME, HELP, SEARCHING, NO_MATCH, 
+    INTRO_PARTNER, LEAVE_CONFIRM, LEAVE_TOO_SOON, LEFT_YOU, LEFT_PARTNER, 
+    REPORT_CONFIRM, REPORT_OK, REPORT_RESULT, MUTED, BANNED, PROFILE_SAVED
+)
 from stickers import STICKERS
 
 # ملفات المشروع
@@ -17,19 +23,21 @@ import storage
 from storage import users, load_users, save_users, ensure_user, update_user_dict, append_history
 import Profile_manger as ProfileManager
 
-# Matchmaking + Moderation (قد تكون fallbacks)
+# Matchmaking + Moderation (مع معالجة fallbacks)
 try:
     from Matchmaking import add_to_wait, try_match, start_timeout_watcher, remove_from_wait
 except Exception as e:
     print(f"[IMPORT Matchmaking ERROR] {e}")
-    def add_to_wait(*args, **kwargs): raise RuntimeError("Matchmaking.add_to_wait unavailable")
+    def add_to_wait(*args, **kwargs): 
+        raise RuntimeError("Matchmaking.add_to_wait unavailable")
     def try_match(*args, **kwargs): return None
     def start_timeout_watcher(bot=None): return
     def remove_from_wait(*args, **kwargs): return
 
 try:
     from Moderation import is_muted, apply_respect, review_history_and_penalize, check_message_safe, contains_bad_word, censor_text
-except Exception:
+except Exception as e:
+    print(f"[IMPORT Moderation ERROR] {e}")
     # fallbacks
     def is_muted(uid): return False
     def apply_respect(uid, text): return 0
@@ -138,14 +146,11 @@ def safe_send(uid: int, text: str, **kwargs):
         except Exception as e:
             print(f"[SEND ERROR] {e} | uid={uid} | preview={str(text)[:120]}")
 
-def remove_kb(uid: int, text: str = None):
+def safe_send_sticker(uid: int, sticker_id: str):
     try:
-        if text:
-            safe_send(uid, text, reply_markup=ReplyKeyboardRemove())
-        else:
-            safe_send(uid, " ", reply_markup=ReplyKeyboardRemove())
+        bot.send_sticker(uid, sticker_id)
     except Exception as e:
-        print(f"[remove_kb ERROR] {e}")
+        print(f"[STICKER ERROR] {e} | uid={uid} | sticker={sticker_id}")
 
 def partner_profile_text(pid: int):
     try:
@@ -165,48 +170,32 @@ def partner_profile_text(pid: int):
 @bot.message_handler(commands=['start'])
 def cmd_start(message: Message):
     uid = message.from_user.id
-    # التأكد من وجود المستخدم في قاعدة البيانات
     u = ensure_user_extended(uid)
 
     # إذا كان المستخدم جديدًا أو لم يُسجل اسمه
     if not u.get("name"):
-        # إرسال الستكر الترحيبي العام
-        try:
-            bot.send_sticker(uid, STICKERS.get("welcome_general"))
-        except Exception:
-            pass
-
-        # إرسال رسالة ترحيبية عشوائية
-        safe_send(uid, get_welcome_message("START"))
+        # إرسال رسالة ترحيبية عشوائية أولاً
+        welcome_msg = get_welcome_message("START")
+        safe_send(uid, welcome_msg)
+        
+        # ثم إرسال الستيكر الترحيبي
+        safe_send_sticker(uid, STICKERS.get("welcome_general"))
 
         # بدء خطوة التسجيل بالاسم
         update_user(uid, {"state": STATE_REGISTER_NAME})
         safe_send(uid, "💡 لنبدأ بإنشاء ملفك الشخصي.\nما هو اسمك؟")
-
-        # تسجيل المعالج للاسم
-        bot.register_next_step_handler(message, handle_register_name)
-
     else:
         # المستخدم قديم، نرحب به مع قائمة رئيسية
-        safe_send(uid, f"👋 مرحبًا مجددًا، {u.get('name')}!", reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+        safe_send(uid, f"👋 مرحبًا مجددًا، {u.get('name')}!", 
+                 reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
-    ProfileManager.set_age(message.from_user.id, age)
-
-    bot.send_message(
-        message.chat.id,
-        messages.PROFILE_SAVED.format(
-            name=ProfileManager.get_name(message.from_user.id),
-            gender=ProfileManager.get_gender(message.from_user.id),
-            age=ProfileManager.get_age(message.from_user.id)
-        ),
-        reply_markup=None
-    )
 @bot.message_handler(commands=["profile"])
 def cmd_profile(m: Message):
     uid = m.from_user.id
     ensure_user_extended(uid)
     u = users[uid]
-    safe_send(uid, ProfileManager.profile_text(u), reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+    safe_send(uid, ProfileManager.profile_text(u), 
+             reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
 @bot.message_handler(commands=["help", "support"])
 def cmd_support(m: Message):
@@ -239,9 +228,11 @@ def on_text(m: Message):
     txt = (m.text or "").strip()
     ensure_user_extended(uid)
     u = users[uid]
+    
     if u.get("banned_full"):
         safe_send(uid, BANNED)
         return
+        
     state = u.get("state") or ""
     print(f"[MSG] from={uid} state={state} text={txt[:120]}")
 
@@ -262,33 +253,43 @@ def on_text(m: Message):
 
     # حالات التسجيل
     if state == STATE_REGISTER_NAME:
-        return handle_register_name(uid, txt)
+        handle_register_name(uid, txt)
+        return
     if state == STATE_REGISTER_GENDER:
-        return handle_register_gender(uid, txt)
+        handle_register_gender(uid, txt)
+        return
     if state == STATE_REGISTER_AGE:
-        return handle_register_age(uid, txt)
+        handle_register_age(uid, txt)
+        return
 
     # تعديل
     if state == STATE_EDIT_NAME:
-        return handle_edit_name(uid, txt)
+        handle_edit_name(uid, txt)
+        return
     if state == STATE_EDIT_AGE:
-        return handle_edit_age(uid, txt)
+        handle_edit_age(uid, txt)
+        return
 
     # اختيار موضوع وهدف
     if state == STATE_CHOOSE_TOPIC:
-        return handle_topic_selection(uid, txt)
+        handle_topic_selection(uid, txt)
+        return
     if state == STATE_CHOOSE_TARGET_GENDER:
-        return handle_target_gender(uid, txt)
+        handle_target_gender(uid, txt)
+        return
 
     # تأكيد مغادرة/ابلاغ
     if state == STATE_CONFIRM_LEAVE:
-        return handle_leave_confirm(uid, u, txt)
+        handle_leave_confirm(uid, u, txt)
+        return
     if state == STATE_CONFIRM_REPORT:
-        return handle_report_text_confirm(uid, u, txt)
+        handle_report_text_confirm(uid, u, txt)
+        return
 
     # قائمة رئيسية
     if txt == "👤 ملفي":
-        safe_send(uid, ProfileManager.profile_text(u), reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+        safe_send(uid, ProfileManager.profile_text(u), 
+                 reply_markup=main_menu(in_chat=bool(u.get("partner"))))
         return
     if txt == "✏️ تعديل الاسم":
         update_user(uid, {"state": STATE_EDIT_NAME})
@@ -308,130 +309,113 @@ def on_text(m: Message):
 
     # إذا المستخدم داخل دردشة، مرّر للمعالجة الخاصة بالدردشة
     if u.get("partner"):
-        return handle_chat_message(uid, txt, u)
+        handle_chat_message(uid, txt, u)
+        return
 
     # افتراضي
-    safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", reply_markup=main_menu(in_chat=False))
+    safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", 
+             reply_markup=main_menu(in_chat=False))
 
 # ---------- التسجيل خطوة بخطوة ----------
 
-def handle_register_name(message: Message):
-    uid = message.from_user.id
-    txt = (message.text or "").strip()
-
+def handle_register_name(uid: int, txt: str):
     if len(txt) < 2 or len(txt) > 30:
         safe_send(uid, "❌ الاسم غير صالح، استخدم 2–30 حرفًا. حاول مرة أخرى:")
-        bot.register_next_step_handler(message, handle_register_name)
         return
 
     # حفظ الاسم
     try:
         ProfileManager.set_name(uid, txt)
         update_user(uid, {"state": STATE_REGISTER_GENDER})
+        
+        # إرسال ستيكر بعد الاسم
+        safe_send_sticker(uid, STICKERS.get("after_name"))
+        
+        # طلب اختيار الجنس
+        safe_send(uid, "💡 اختر جنسك:", reply_markup=gender_menu())
+        
     except Exception as e:
         print(f"[handle_register_name ERROR] {e}")
         safe_send(uid, "❌ حدث خطأ أثناء حفظ الاسم. حاول مرة أخرى:")
-        bot.register_next_step_handler(message, handle_register_name)
-        return
 
-    # إرسال ستيكر بعد الاسم
-    try:
-        bot.send_sticker(uid, STICKERS.get("after_name"))
-    except Exception:
-        pass
-
-    # طلب اختيار الجنس
-    safe_send(uid, "💡 اختر جنسك:", reply_markup=gender_menu())
-    bot.register_next_step_handler(message, handle_register_gender)
-
-
-def handle_register_gender(message: Message):
-    uid = message.from_user.id
-    txt = (message.text or "").strip()
-
+def handle_register_gender(uid: int, txt: str):
     valid_genders = getattr(config, "GENDERS", ["ذكر", "أنثى"])
     if txt not in valid_genders:
-        safe_send(uid, f"❌ اختر جنسًا صالحًا: {' / '.join(valid_genders)}", reply_markup=gender_menu())
-        bot.register_next_step_handler(message, handle_register_gender)
+        safe_send(uid, f"❌ اختر جنسًا صالحًا: {' / '.join(valid_genders)}", 
+                 reply_markup=gender_menu())
         return
 
     try:
         ProfileManager.set_gender(uid, txt)
         update_user(uid, {"state": STATE_REGISTER_AGE})
+        
+        # إرسال رسالة طلب العمر
+        safe_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
+        
     except Exception as e:
         print(f"[handle_register_gender ERROR] {e}")
         safe_send(uid, "❌ حدث خطأ أثناء حفظ الجنس. حاول مرة أخرى:")
-        bot.register_next_step_handler(message, handle_register_gender)
-        return
 
-    # إرسال رسالة طلب العمر
-    safe_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
-    bot.register_next_step_handler(message, handle_register_age)
-
-
-def handle_register_age(message: Message):
-    uid = message.from_user.id
-    txt = (message.text or "").strip()
-
+def handle_register_age(uid: int, txt: str):
     # التحقق من أن الإدخال رقم
     try:
         age = int(txt)
     except ValueError:
         safe_send(uid, "❌ من فضلك أدخل العمر كرقم بين 10 و120:")
-        bot.register_next_step_handler(message, handle_register_age)
         return
 
     # التحقق من أن العمر ضمن النطاق المنطقي
     if age < 10 or age > 120:
         safe_send(uid, "❌ العمر غير منطقي. حاول مرة أخرى (10–120):")
-        bot.register_next_step_handler(message, handle_register_age)
         return
 
     # حفظ العمر وتحديث الحالة
     try:
         ProfileManager.set_age(uid, age)
         update_user(uid, {"state": None})
+        
+        # استدعاء المستخدم من قاعدة البيانات بعد التحديث
+        u = storage.users.get(uid, {})
+        
+        # إرسال رسالة تأكيد حفظ الملف الشخصي
+        safe_send(uid, PROFILE_SAVED.format(
+            name=u.get("name", "غير محدد"),
+            gender=u.get("gender", "غير محدد"),
+            age=u.get("age", "غير محدد")
+        ), reply_markup=main_menu(in_chat=False))
+        
     except Exception as e:
         print(f"[handle_register_age ERROR] {e}")
         safe_send(uid, "❌ حدث خطأ أثناء حفظ العمر. حاول مرة أخرى:")
-        bot.register_next_step_handler(message, handle_register_age)
-        return
-
-    # استدعاء المستخدم من قاعدة البيانات بعد التحديث
-    u = storage.users.get(uid, {})
-
-    # إرسال رسالة تأكيد حفظ الملف الشخصي
-    safe_send(uid, PROFILE_SAVED.format(
-        name=u.get("name"),
-        gender=u.get("gender"),
-        age=u.get("age")
-    ), reply_markup=main_menu(in_chat=False))
 
 # دوال التعديل
 def handle_edit_name(uid: int, txt: str):
     try:
-        ok = ProfileManager.set_user_name(uid, txt)
-        if not ok:
-            safe_send(uid, "❌ الاسم غير صالح. حاول مجددًا:")
+        if len(txt) < 2 or len(txt) > 30:
+            safe_send(uid, "❌ الاسم غير صالح (2-30 حرف). حاول مجددًا:")
             return
+            
+        ProfileManager.set_name(uid, txt)
         update_user(uid, {"state": None})
-        safe_send(uid, f"✅ تم تحديث الاسم إلى: {users[uid].get('name')}", reply_markup=main_menu(in_chat=False))
+        safe_send(uid, f"✅ تم تحديث الاسم إلى: {txt}", 
+                 reply_markup=main_menu(in_chat=False))
     except Exception as e:
         print(f"[handle_edit_name ERROR] {e}")
-        print(traceback.format_exc())
         safe_send(uid, "❌ حدث خطأ أثناء تعديل الاسم.")
 
 def handle_edit_age(uid: int, txt: str):
     try:
-        ok = ProfileManager.set_user_age(uid, txt)
-        if not ok:
+        age = int(txt)
+        if age < 10 or age > 120:
             safe_send(uid, "❌ العمر غير صالح. أرسل رقمًا بين 10 و120:")
             return
+            
+        ProfileManager.set_age(uid, age)
         update_user(uid, {"state": None})
-        safe_send(uid, f"✅ تم تحديث العمر إلى: {users[uid].get('age')}", reply_markup=main_menu(in_chat=False))
+        safe_send(uid, f"✅ تم تحديث العمر إلى: {age}", 
+                 reply_markup=main_menu(in_chat=False))
     except Exception as e:
         print(f"[handle_edit_age ERROR] {e}")
-        print(traceback.format_exc())
         safe_send(uid, "❌ حدث خطأ أثناء تعديل العمر.")
 
 # البحث والمطابقة
@@ -439,25 +423,27 @@ def handle_search_request(uid: int):
     ensure_user_extended(uid)
     u = users[uid]
     if u.get("partner"):
-        safe_send(uid, "⚠️ أنت بالفعل في دردشة!", reply_markup=main_menu(in_chat=True))
+        safe_send(uid, "⚠️ أنت بالفعل في دردشة!", 
+                 reply_markup=main_menu(in_chat=True))
         return
     update_user(uid, {"state": STATE_CHOOSE_TOPIC})
     safe_send(uid, "اختر موضوع النقاش:", reply_markup=topics_menu())
 
 def handle_topic_selection(uid: int, txt: str):
-    txt = txt.strip()
     try:
         TOPICS = getattr(config, "TOPICS", ["عام"])
     except Exception:
         TOPICS = ["عام"]
+    
     if txt not in TOPICS:
         safe_send(uid, "❌ اختر موضوعًا صالحًا من القائمة.", reply_markup=topics_menu())
         return
+        
     update_user(uid, {"topic": txt, "state": STATE_CHOOSE_TARGET_GENDER})
-    safe_send(uid, f"تم اختيار الموضوع: {txt}\nالآن اختر جنس الطرف الذي تريده:", reply_markup=target_gender_menu())
+    safe_send(uid, f"تم اختيار الموضوع: {txt}\nالآن اختر جنس الطرف الذي تريده:", 
+             reply_markup=target_gender_menu())
 
 def handle_target_gender(uid: int, txt: str):
-    txt = txt.strip()
     valid = getattr(config, "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"])
     if txt not in valid:
         safe_send(uid, f"❌ اختر: {' / '.join(valid)}", reply_markup=target_gender_menu())
@@ -473,16 +459,14 @@ def handle_target_gender(uid: int, txt: str):
     u = users[uid]
     topic = u.get("topic")
     update_user(uid, {"target_gender": target, "state": STATE_SEARCHING})
+    
     # أضف إلى الانتظار
     try:
         add_to_wait(topic, uid, target)
-    except Exception:
-        try:
-            add_to_wait(uid, topic, target)
-        except Exception as e:
-            print(f"[add_to_wait ERROR] {e}")
+    except Exception as e:
+        print(f"[add_to_wait ERROR] {e}")
 
-    # رسالة البحث (لا نعلن الفشل فوراً)
+    # رسالة البحث
     safe_send(uid, SEARCHING, reply_markup=ReplyKeyboardRemove())
 
     # حاول المطابقة فوراً
@@ -497,28 +481,21 @@ def handle_target_gender(uid: int, txt: str):
             pid = int(partner)
             update_user(uid, {"partner": pid, "state": None, "chat_started_at": time.time()})
             update_user(pid, {"partner": uid, "state": None, "chat_started_at": time.time()})
-            try:
-                ProfileManager.start_history(users[uid])
-                ProfileManager.start_history(users[pid])
-            except Exception:
-                pass
+            
+            ProfileManager.start_history(users[uid])
+            ProfileManager.start_history(users[pid])
+            
             safe_send(uid, partner_profile_text(pid), reply_markup=ReplyKeyboardRemove())
             safe_send(pid, partner_profile_text(uid), reply_markup=ReplyKeyboardRemove())
             safe_send(uid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
             safe_send(pid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
         except Exception as e:
             print(f"[MATCH SETUP ERROR] {e}")
-    else:
-        # يبقى في قائمة الانتظار — watcher سيبلغ المستخدم بعد مرور SEARCH_TIMEOUT
-        pass
 
     try:
         start_timeout_watcher(bot)
     except Exception as e:
-        try:
-            start_timeout_watcher()
-        except Exception as e:
-            print(f"[start_timeout_watcher ERROR] {e}")
+        print(f"[start_timeout_watcher ERROR] {e}")
 
 # مغادرة الدردشة
 def handle_leave_request(uid: int):
@@ -538,21 +515,17 @@ def handle_leave_confirm(uid: int, u: dict, txt: str):
         pid = u.get("partner")
         if pid:
             try:
-                try:
-                    ProfileManager.end_session(users[uid], users[pid])
-                except Exception:
-                    ProfileManager.end_session(users.get(uid), users.get(pid))
+                ProfileManager.end_session(users[uid], users[pid])
             except Exception:
                 pass
+                
             update_user(uid, {"partner": None, "state": None, "chat_started_at": None})
             update_user(pid, {"partner": None, "state": None, "chat_started_at": None})
+            
             safe_send(uid, "لقد غادرت الدردشة.", reply_markup=main_menu(in_chat=False))
+            
             try:
-                # send sticker to partner that other left
-                try:
-                    bot.send_sticker(pid, STICKERS.get("partner_left"))
-                except Exception:
-                    pass
+                safe_send_sticker(pid, STICKERS.get("partner_left"))
                 safe_send(pid, "شريكك غادر الدردشة.", reply_markup=main_menu(in_chat=False))
             except Exception:
                 pass
@@ -572,30 +545,34 @@ def handle_report_text_confirm(uid: int, u: dict, txt: str):
         try:
             hist = []
             if pid and users.get(pid):
-                # مراجعة تاريخ الشريك (أو كلا الطرفين حسب منطقك)
                 hist = users[pid].get("history", [])
             res = review_history_and_penalize(uid, pid, hist)
-            # res -> (lines, badwords, penalty, new_respect)
+            lines, badwords, penalty, new_respect = res
         except Exception as e:
             print(f"[review_history_and_penalize ERROR] {e}")
             res = (0,0,0, users.get(pid, {}).get("respect", "—") if pid else "—")
+            lines, badwords, penalty, new_respect = res
+            
         update_user(uid, {"state": None})
         safe_send(uid, REPORT_OK)
-        if res:
-            lines, badwords, penalty, new_respect = res
-            safe_send(uid, REPORT_RESULT.format(lines=lines, badwords=badwords, penalty=penalty, new_respect=new_respect))
-            # أخبر الشريك إن وُجد
-            try:
-                if pid:
-                    safe_send(pid, f"🔔 تم تلقي بلاغ ضدك. تم مراجعة المحادثة وخصم {penalty} نقطة احترام. الاحترام الآن: {new_respect}.")
-            except Exception:
-                pass
+        safe_send(uid, REPORT_RESULT.format(
+            lines=lines, badwords=badwords, penalty=penalty, new_respect=new_respect
+        ))
+        
+        # أخبر الشريك إن وُجد
+        try:
+            if pid:
+                safe_send(pid, f"🔔 تم تلقي بلاغ ضدك. تم مراجعة المحادثة وخصم {penalty} نقطة احترام. الاحترام الآن: {new_respect}.")
+        except Exception:
+            pass
+            
     elif txt == "لا ❌":
         update_user(uid, {"state": None})
         safe_send(uid, "تم الإلغاء. شكراً لحرصك.")
     else:
         safe_send(uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
         return
+        
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     kb.add(KeyboardButton("🚪 مغادرة الدردشة"))
     safe_send(uid, "هل تريد الآن مغادرة الدردشة؟", reply_markup=kb)
@@ -670,11 +647,8 @@ def set_webhook():
 # شغل watcher للمطابقة
 try:
     start_timeout_watcher(bot)
-except Exception:
-    try:
-        start_timeout_watcher()
-    except Exception as e:
-        print(f"[start_timeout_watcher ERROR] {e}")
+except Exception as e:
+    print(f"[start_timeout_watcher ERROR] {e}")
 
 # نقطة التشغيل
 if __name__ == "__main__":
