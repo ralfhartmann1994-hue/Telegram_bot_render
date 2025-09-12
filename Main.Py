@@ -372,6 +372,8 @@ def handle_register_gender(message: Message):
 def handle_register_age(message: Message):
     uid = message.from_user.id
     txt = (message.text or "").strip()
+
+    # التحقق من أن الإدخال رقم
     try:
         age = int(txt)
     except ValueError:
@@ -379,11 +381,13 @@ def handle_register_age(message: Message):
         bot.register_next_step_handler(message, handle_register_age)
         return
 
+    # التحقق من أن العمر ضمن النطاق المنطقي
     if age < 10 or age > 120:
         safe_send(uid, "❌ العمر غير منطقي. حاول مرة أخرى (10–120):")
         bot.register_next_step_handler(message, handle_register_age)
         return
 
+    # حفظ العمر وتحديث الحالة
     try:
         ProfileManager.set_age(uid, age)
         update_user(uid, {"state": None})
@@ -393,13 +397,15 @@ def handle_register_age(message: Message):
         bot.register_next_step_handler(message, handle_register_age)
         return
 
-    # إرسال تأكيد حفظ الملف الشخصي
-u = storage.users.get(uid, {})
-safe_send(uid, PROFILE_SAVED.format(
-    name=u.get("name"),
-    gender=u.get("gender"),
-    age=u.get("age")
-), reply_markup=main_menu(in_chat=False))
+    # استدعاء المستخدم من قاعدة البيانات بعد التحديث
+    u = storage.users.get(uid, {})
+
+    # إرسال رسالة تأكيد حفظ الملف الشخصي
+    safe_send(uid, PROFILE_SAVED.format(
+        name=u.get("name"),
+        gender=u.get("gender"),
+        age=u.get("age")
+    ), reply_markup=main_menu(in_chat=False))
 
 # دوال التعديل
 def handle_edit_name(uid: int, txt: str):
