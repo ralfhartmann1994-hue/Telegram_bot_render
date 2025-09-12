@@ -1,25 +1,28 @@
 # config.py
 import os
 
-# ===== التوكن وإعدادات الإدارة =====
-TOKEN = os.environ.get("TELEGRAM_TOKEN")  # خزّنه في Render → Environment
-ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")  # اختياري لإرسال بلاغات
+# وقت البحث بالثواني (30 دقيقة)
+SEARCH_TIMEOUT = int(os.getenv("SEARCH_TIMEOUT", 30 * 60))
+# فاصل تحقق الـ watcher بالثواني
+SEARCH_CHECK_INTERVAL = int(os.getenv("SEARCH_CHECK_INTERVAL", 10))
 
-# ===== التسجيل/المطابقة =====
-SEARCH_TIMEOUT = 30 * 60       # نصف ساعة (بالثواني)
-LEAVE_DELAY = 30               # لا يمكن المغادرة قبل 30 ثانية من بداية المحادثة
+RESPECT_PENALTY_PER_BADWORD = int(os.getenv("RESPECT_PENALTY_PER_BADWORD", 5))
+PARTIAL_BAN_THRESHOLD = int(os.getenv("PARTIAL_BAN_THRESHOLD", 40))
+FULL_BAN_THRESHOLD = int(os.getenv("FULL_BAN_THRESHOLD", 25))
+PARTIAL_BAN_DAYS = int(os.getenv("PARTIAL_BAN_DAYS", 7))
+MAX_HISTORY_TO_REVIEW = int(os.getenv("MAX_HISTORY_TO_REVIEW", 50))
 
-# ===== الاحترام والعقوبات =====
-RESPECT_START = 80
-PENALTY_PER_HIT = 5            # خصم 5 لكل ضربة (حسب المراحل)
-WARN_THRESHOLD = 40            # عند/أقل من 40 = حظر جزئي
-BAN_THRESHOLD = 25             # عند/أقل من 25 = حظر كامل
-PARTIAL_BAN_DAYS = 7           # مدة الحظر الجزئي بالأيام
+USERS_DB_PATH = os.getenv("USERS_DB_PATH", "users_db.json")
 
-# ===== مواضيع النقاش =====
-TOPICS = ["🎭 فلسفة", "🕌 دين", "🏛️ سياسة", "🤝 تعارف", "⚽ رياضة"]
+# موضوعات افتراضية (يمكن تعديلها)
+TOPICS = ["عام", "رياضة", "سياسة", "دين", "فلسفة", "تعارف"]
 GENDERS = ["ذكر", "أنثى"]
 TARGET_GENDERS = ["👨 رجل", "👩 امرأة"]
 
-# ===== Webhook =====
-WEBHOOK_PATH = "bot_webhook"  # الجزء الأخير من رابط Webhook
+# Leave delay (seconds) before user can leave chat
+LEAVE_DELAY = int(os.getenv("LEAVE_DELAY", 30))
+
+# Webhook settings (اختياري)
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", None)
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "webhook")
+PORT = int(os.getenv("PORT", "5000"))
