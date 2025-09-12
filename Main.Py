@@ -18,8 +18,8 @@ import storage
 from storage import users, load_users, save_users
 
 # profile manager
-import profile_manager as ProfileManager
-from profile_manager import (
+import Profile_manger as ProfileManager
+from Profile_manger import (
     ensure_user,
     set_user_name,
     set_user_age,
