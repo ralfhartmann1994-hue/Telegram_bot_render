@@ -1,11 +1,13 @@
 # Profile_manger.py
-from storage import ensure_user, update_user_dict, append_history
+import storage
+from storage import ensure_user as ensure_user_storage, update_user_dict, append_history
 import re
 
-NAME_RE = re.compile(r"^[\p{L}\w\s\-]{2,30}$", re.UNICODE) if False else re.compile(r"^[\w\s\-]{2,30}$")
+# Regex للأسماء (يمكن تعديل Unicode لاحقًا)
+NAME_RE = re.compile(r"^[\w\s\-]{2,30}$")
 
 def ensure_user(uid: int):
-    return ensure_user(uid)
+    return ensure_user_storage(uid)
 
 def set_name(user_id, name):
     storage.USERS.setdefault(user_id, {})
@@ -36,12 +38,9 @@ def profile_text(u: dict):
     return f"👤 <b>ملفي الشخصي</b>\n• الاسم: {name}\n• العمر: {age}\n• الجنس: {gender}\n• الاحترام: ⭐ {respect}"
 
 def start_history(u: dict):
-    # مجرد علامة، يمكن توسيعها
     u.setdefault("history", [])
-    return
 
 def end_session(u1: dict, u2: dict=None):
-    # مسح تاريخ الجلسة أو إنهاء الشراكة
     try:
         if u1:
             u1["partner"] = None
@@ -50,4 +49,4 @@ def end_session(u1: dict, u2: dict=None):
             u2["partner"] = None
             u2["chat_started_at"] = None
     except Exception:
-        pass 
+        pass
