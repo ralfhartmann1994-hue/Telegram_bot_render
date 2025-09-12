@@ -1,6 +1,4 @@
-# =================
-# Main.py (مصحح بالكامل)
-# =================
+# Main.py (مصحح لحل مشكلة التسجيل)
 import os
 import time
 import traceback
@@ -221,7 +219,7 @@ def cmd_report(m: Message):
     update_user(uid, {"state": STATE_CONFIRM_REPORT})
     safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
 
-# الالتقاط العام للنص
+# الالتقاط العام للنص - هنا المشكلة والحل
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
 def on_text(m: Message):
     uid = m.from_user.id
@@ -235,6 +233,41 @@ def on_text(m: Message):
         
     state = u.get("state") or ""
     print(f"[MSG] from={uid} state={state} text={txt[:120]}")
+
+    # معالجة حالات التسجيل أولاً (هذا هو الحل)
+    if state == STATE_REGISTER_NAME:
+        handle_register_name(uid, txt)
+        return
+    elif state == STATE_REGISTER_GENDER:
+        handle_register_gender(uid, txt)
+        return
+    elif state == STATE_REGISTER_AGE:
+        handle_register_age(uid, txt)
+        return
+
+    # معالجة حالات التعديل
+    elif state == STATE_EDIT_NAME:
+        handle_edit_name(uid, txt)
+        return
+    elif state == STATE_EDIT_AGE:
+        handle_edit_age(uid, txt)
+        return
+
+    # معالجة حالات البحث
+    elif state == STATE_CHOOSE_TOPIC:
+        handle_topic_selection(uid, txt)
+        return
+    elif state == STATE_CHOOSE_TARGET_GENDER:
+        handle_target_gender(uid, txt)
+        return
+
+    # معالجة حالات التأكيد
+    elif state == STATE_CONFIRM_LEAVE:
+        handle_leave_confirm(uid, u, txt)
+        return
+    elif state == STATE_CONFIRM_REPORT:
+        handle_report_text_confirm(uid, u, txt)
+        return
 
     # زر "تواصل مع الدعم"
     if txt == "تواصل مع الدعم":
@@ -251,59 +284,24 @@ def on_text(m: Message):
         safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
         return
 
-    # حالات التسجيل
-    if state == STATE_REGISTER_NAME:
-        handle_register_name(uid, txt)
-        return
-    if state == STATE_REGISTER_GENDER:
-        handle_register_gender(uid, txt)
-        return
-    if state == STATE_REGISTER_AGE:
-        handle_register_age(uid, txt)
-        return
-
-    # تعديل
-    if state == STATE_EDIT_NAME:
-        handle_edit_name(uid, txt)
-        return
-    if state == STATE_EDIT_AGE:
-        handle_edit_age(uid, txt)
-        return
-
-    # اختيار موضوع وهدف
-    if state == STATE_CHOOSE_TOPIC:
-        handle_topic_selection(uid, txt)
-        return
-    if state == STATE_CHOOSE_TARGET_GENDER:
-        handle_target_gender(uid, txt)
-        return
-
-    # تأكيد مغادرة/ابلاغ
-    if state == STATE_CONFIRM_LEAVE:
-        handle_leave_confirm(uid, u, txt)
-        return
-    if state == STATE_CONFIRM_REPORT:
-        handle_report_text_confirm(uid, u, txt)
-        return
-
     # قائمة رئيسية
     if txt == "👤 ملفي":
         safe_send(uid, ProfileManager.profile_text(u), 
                  reply_markup=main_menu(in_chat=bool(u.get("partner"))))
         return
-    if txt == "✏️ تعديل الاسم":
+    elif txt == "✏️ تعديل الاسم":
         update_user(uid, {"state": STATE_EDIT_NAME})
         safe_send(uid, "✏️ أرسل الاسم الجديد:", reply_markup=ReplyKeyboardRemove())
         return
-    if txt == "🎂 تعديل العمر":
+    elif txt == "🎂 تعديل العمر":
         update_user(uid, {"state": STATE_EDIT_AGE})
         safe_send(uid, "🎂 أرسل العمر الجديد (10–120):", reply_markup=ReplyKeyboardRemove())
         return
-    if txt == "🆘 مساعدة":
+    elif txt == "🆘 مساعدة":
         support_handle = "@MAA2857"
         safe_send(uid, f"تواصل مع الدعم: {support_handle}")
         return
-    if txt == "🔍 البحث عن دردشة":
+    elif txt == "🔍 البحث عن دردشة":
         handle_search_request(uid)
         return
 
@@ -316,16 +314,20 @@ def on_text(m: Message):
     safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", 
              reply_markup=main_menu(in_chat=False))
 
-# ---------- التسجيل خطوة بخطوة ----------
+# ---------- دوال التسجيل (مبسطة بدون next_step_handler) ----------
 
 def handle_register_name(uid: int, txt: str):
+    print(f"[REGISTER_NAME] uid={uid}, text={txt}")
+    
     if len(txt) < 2 or len(txt) > 30:
         safe_send(uid, "❌ الاسم غير صالح، استخدم 2–30 حرفًا. حاول مرة أخرى:")
         return
 
-    # حفظ الاسم
     try:
+        # حفظ الاسم
         ProfileManager.set_name(uid, txt)
+        
+        # الانتقال لحالة اختيار الجنس
         update_user(uid, {"state": STATE_REGISTER_GENDER})
         
         # إرسال ستيكر بعد الاسم
@@ -334,11 +336,15 @@ def handle_register_name(uid: int, txt: str):
         # طلب اختيار الجنس
         safe_send(uid, "💡 اختر جنسك:", reply_markup=gender_menu())
         
+        print(f"[REGISTER_NAME] Success for uid={uid}")
+        
     except Exception as e:
         print(f"[handle_register_name ERROR] {e}")
         safe_send(uid, "❌ حدث خطأ أثناء حفظ الاسم. حاول مرة أخرى:")
 
 def handle_register_gender(uid: int, txt: str):
+    print(f"[REGISTER_GENDER] uid={uid}, text={txt}")
+    
     valid_genders = getattr(config, "GENDERS", ["ذكر", "أنثى"])
     if txt not in valid_genders:
         safe_send(uid, f"❌ اختر جنسًا صالحًا: {' / '.join(valid_genders)}", 
@@ -346,17 +352,24 @@ def handle_register_gender(uid: int, txt: str):
         return
 
     try:
+        # حفظ الجنس
         ProfileManager.set_gender(uid, txt)
+        
+        # الانتقال لحالة إدخال العمر
         update_user(uid, {"state": STATE_REGISTER_AGE})
         
         # إرسال رسالة طلب العمر
         safe_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
+        
+        print(f"[REGISTER_GENDER] Success for uid={uid}")
         
     except Exception as e:
         print(f"[handle_register_gender ERROR] {e}")
         safe_send(uid, "❌ حدث خطأ أثناء حفظ الجنس. حاول مرة أخرى:")
 
 def handle_register_age(uid: int, txt: str):
+    print(f"[REGISTER_AGE] uid={uid}, text={txt}")
+    
     # التحقق من أن الإدخال رقم
     try:
         age = int(txt)
@@ -369,12 +382,14 @@ def handle_register_age(uid: int, txt: str):
         safe_send(uid, "❌ العمر غير منطقي. حاول مرة أخرى (10–120):")
         return
 
-    # حفظ العمر وتحديث الحالة
     try:
+        # حفظ العمر
         ProfileManager.set_age(uid, age)
+        
+        # إنهاء حالة التسجيل
         update_user(uid, {"state": None})
         
-        # استدعاء المستخدم من قاعدة البيانات بعد التحديث
+        # استدعاء المستخدم المحديث
         u = storage.users.get(uid, {})
         
         # إرسال رسالة تأكيد حفظ الملف الشخصي
@@ -384,11 +399,14 @@ def handle_register_age(uid: int, txt: str):
             age=u.get("age", "غير محدد")
         ), reply_markup=main_menu(in_chat=False))
         
+        print(f"[REGISTER_AGE] Success for uid={uid}")
+        
     except Exception as e:
         print(f"[handle_register_age ERROR] {e}")
         safe_send(uid, "❌ حدث خطأ أثناء حفظ العمر. حاول مرة أخرى:")
 
-# دوال التعديل
+# ---------- باقي الدوال تبقى كما هي ----------
+
 def handle_edit_name(uid: int, txt: str):
     try:
         if len(txt) < 2 or len(txt) > 30:
@@ -418,7 +436,6 @@ def handle_edit_age(uid: int, txt: str):
         print(f"[handle_edit_age ERROR] {e}")
         safe_send(uid, "❌ حدث خطأ أثناء تعديل العمر.")
 
-# البحث والمطابقة
 def handle_search_request(uid: int):
     ensure_user_extended(uid)
     u = users[uid]
@@ -497,7 +514,6 @@ def handle_target_gender(uid: int, txt: str):
     except Exception as e:
         print(f"[start_timeout_watcher ERROR] {e}")
 
-# مغادرة الدردشة
 def handle_leave_request(uid: int):
     ensure_user_extended(uid)
     u = users[uid]
@@ -538,7 +554,6 @@ def handle_leave_confirm(uid: int, u: dict, txt: str):
     else:
         safe_send(uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
 
-# تأكيد الإبلاغ
 def handle_report_text_confirm(uid: int, u: dict, txt: str):
     if txt == "نعم ✅":
         pid = u.get("partner")
@@ -577,7 +592,6 @@ def handle_report_text_confirm(uid: int, u: dict, txt: str):
     kb.add(KeyboardButton("🚪 مغادرة الدردشة"))
     safe_send(uid, "هل تريد الآن مغادرة الدردشة؟", reply_markup=kb)
 
-# تمرير الرسائل بين الشركاء
 def handle_chat_message(uid: int, txt: str, u: dict):
     if txt in ("🚪 مغادرة الدردشة", "🚨 إبلاغ", "تواصل مع الدعم"):
         return
