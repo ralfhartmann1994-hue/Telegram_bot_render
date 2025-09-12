@@ -132,9 +132,14 @@ def cmd_start(m: Message):
         print(f"[START SEND ERROR] {e}")
 
     # اسأل عن الاسم أولًا مباشرة بعد الترحيب
-    update_user(uid, {"state": STATE_AWAIT_NAME})
     try:
-        bot.send_message(uid, "✏️ ما اسمك؟")  # بدون ReplyKeyboardRemove أو delay
+        update_user(uid, {"state": STATE_REGISTER_NAME})  # صححت الاسم هنا
+    except Exception as e:
+        print(f"[UPDATE USER (START) ERROR] {e}")
+
+    try:
+        # نزيل أي لوحة مفاتيح سابقة ثم نطلب الاسم
+        bot.send_message(uid, "✏️ ما اسمك؟", reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         print(f"[ASK NAME ERROR] {e}")
 
