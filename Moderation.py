@@ -1,85 +1,59 @@
-# moderation.py
+# Moderation.py
 import time
-from typing import Tuple
-from config import PENALTY_PER_HIT, WARN_THRESHOLD, BAN_THRESHOLD, PARTIAL_BAN_DAYS
-from storage import users, save_users
-from Bad_word import count_bad_words
+from typing import List
+from storage import ensure_user, update_user_dict
+from config import RESPECT_PENALTY_PER_BADWORD, PARTIAL_BAN_THRESHOLD, FULL_BAN_THRESHOLD, PARTIAL_BAN_DAYS, MAX_HISTORY_TO_REVIEW
 
-def is_muted(obj) -> Tuple[bool, int | None]:
-    # إذا أُعطي uid، خذ users[uid]
-    if isinstance(obj, int):
-        u = users.get(obj) or {}
-    else:
-        u = obj or {}
-    mu = u.get("mute_until")
-    ...
-    if not mu:
-        return (False, None)
-    now = time.time()
-    if now >= mu:
-        u["mute_until"] = None
-        save_users()
-        return (False, None)
-    return (True, int(mu - now))
+# قائمة كلمات سيئة مبدئية — عدّلها حسب حاجتك
+BAD_WORDS = {"****", "كلمةسيئة"}  # استبدل بقائمتك الحقيقية
 
-def apply_respect(uid: int, text: str) -> str | None:
-    """تطبيق الخصم عند إرسال رسالة تحتوي إساءة، مع تصعيد المراحل."""
-    u = users.get(uid)
-    if not u or u.get("banned_full"):
-        return None
-    bad = count_bad_words(text)
-    if bad <= 0:
-        return None
+def contains_bad_word(text: str) -> List[str]:
+    if not text:
+        return []
+    t = text.lower()
+    found = []
+    for w in BAD_WORDS:
+        if w in t:
+            found.append(w)
+    return found
 
-    stage = u.get("penalty_stage", 1)
-    threshold = 3 if stage == 1 else (2 if stage == 2 else 1)
-    penalties = bad // threshold
-    if penalties <= 0:
-        return None
+def censor_text(text: str) -> str:
+    t = text
+    for w in BAD_WORDS:
+        t = t.replace(w, "*" * len(w))
+    return t
 
-    deduct = PENALTY_PER_HIT * penalties
-    u["respect"] = max(0, u.get("respect", 80) - deduct)
-    u["total_penalties"] = int(u.get("total_penalties", 0)) + penalties
+def apply_respect(uid: int, text: str) -> int:
+    bad = contains_bad_word(text)
+    if not bad:
+        return 0
+    dec = RESPECT_PENALTY_PER_BADWORD * len(bad)
+    u = ensure_user(uid)
+    new_respect = max(0, int(u.get("respect", 100)) - dec)
+    update_user_dict(uid, {"respect": new_respect})
+    # apply bans/mutes
+    if new_respect <= FULL_BAN_THRESHOLD:
+        update_user_dict(uid, {"banned_full": True})
+    elif new_respect <= PARTIAL_BAN_THRESHOLD:
+        mute_until = int(time.time() + PARTIAL_BAN_DAYS * 24 * 3600)
+        update_user_dict(uid, {"muted_until": mute_until})
+    return dec
 
-    # تصعيد
-    tp = u["total_penalties"]
-    if stage == 1 and tp >= 1:
-        u["penalty_stage"] = 2
-    elif stage == 2 and tp >= 2:
-        u["penalty_stage"] = 3
-
-    msg = None
-    if u["respect"] <= BAN_THRESHOLD:
-        u["banned_full"] = True
-        msg = "🚫 تم حظرك نهائيًا بسبب تكرار الإساءة."
-    elif u["respect"] <= WARN_THRESHOLD and not u.get("mute_until"):
-        u["mute_until"] = time.time() + PARTIAL_BAN_DAYS * 24 * 3600
-        msg = f"⏳ تم تفعيل حظر جزئي لمدة {PARTIAL_BAN_DAYS} أيام."
-
-    save_users()
-    return msg
-
-def review_history_and_penalize(u1_id: int, u2_id: int, history: list) -> tuple[str, str]:
-    """تحليل آخر 50 رسالة وخصم نقاط وفق الإساءة لكل طرف."""
-    c1 = c2 = 0
-    for r in history[-50:]:
-        hits = count_bad_words(r.get("text", ""))
-        if hits > 0:
-            if r.get("from") == u1_id:
-                c1 += hits
-            elif r.get("from") == u2_id:
-                c2 += hits
-
-    d1 = d2 = 0
-    if c1:
-        d1 = c1 * PENALTY_PER_HIT
-        users[u1_id]["respect"] = max(0, users[u1_id].get("respect", 80) - d1)
-    if c2:
-        d2 = c2 * PENALTY_PER_HIT
-        users[u2_id]["respect"] = max(0, users[u2_id].get("respect", 80) - d2)
-    save_users()
-
-    return (
-        f"أنت: -{d1} (اكتُشفت {c1} إساءات)",
-        f"الطرف الآخر: -{d2} (اكتُشفت {c2} إساءات)"
-    ) 
+def review_history_and_penalize(reporter_uid: int, partner_uid: int, history_list: list):
+    if not partner_uid:
+        return (0, 0, 0, 0)
+    hist = history_list[-MAX_HISTORY_TO_REVIEW:]
+    total_bad = 0
+    for item in hist:
+        text = item.get("text") if isinstance(item, dict) else str(item)
+        total_bad += len(contains_bad_word(text))
+    penalty = total_bad * RESPECT_PENALTY_PER_BADWORD
+    p = ensure_user(partner_uid)
+    new_respect = max(0, int(p.get("respect", 100)) - penalty)
+    update_user_dict(partner_uid, {"respect": new_respect})
+    if new_respect <= FULL_BAN_THRESHOLD:
+        update_user_dict(partner_uid, {"banned_full": True})
+    elif new_respect <= PARTIAL_BAN_THRESHOLD:
+        mute_until = int(time.time() + PARTIAL_BAN_DAYS * 24 * 3600)
+        update_user_dict(partner_uid, {"muted_until": mute_until})
+    return (len(hist), total_bad, penalty, new_respect)
