@@ -1,98 +1,52 @@
 # Main.py
-# مُعاد كتابة لتصحيح سلوك الواجهة (أزرار، مغادرة، إبلاغ، تعريف الشريك) وتجهيز نقاط/إحالات
-# تاريخ: 2025-09
 import os
 import time
 import traceback
+import importlib
 from flask import Flask, request
 import telebot
-from telebot.types import (
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardRemove,
-    Message,
-)
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, Message
 
-# ---------- استيراد ملفات المشروع (fallbacks متاحة) ----------
+# استيراد إعدادات ورسائل وستيكرات
+config = importlib.import_module("config")
+from messages import delayed_send, get_welcome_message, WELCOME, HELP, SEARCHING, NO_MATCH, INTRO_PARTNER, LEAVE_CONFIRM, LEAVE_TOO_SOON, LEFT_YOU, LEFT_PARTNER, REPORT_CONFIRM, REPORT_OK, REPORT_RESULT, MUTED, BANNED
+from stickers import STICKERS
+
+# ملفات المشروع
 import storage
-from storage import users, load_users, save_users
-
-# profile manager
+from storage import users, load_users, save_users, ensure_user, update_user_dict, append_history
 import Profile_manger as ProfileManager
-from Profile_manger import (
-    ensure_user,
-    set_user_name,
-    set_user_age,
-    set_user_gender,
-    profile_text,
-    start_history,
-    append_history,
-    end_session,
-)
 
-# Matchmaking
+# Matchmaking + Moderation (قد تكون fallbacks)
 try:
     from Matchmaking import add_to_wait, try_match, start_timeout_watcher, remove_from_wait
-except Exception:
-    def add_to_wait(*args, **kwargs):
-        raise RuntimeError("Matchmaking.add_to_wait unavailable")
-    def try_match(*args, **kwargs):
-        return None
-    def start_timeout_watcher(bot=None):
-        return
-    def remove_from_wait(*args, **kwargs):
-        return
+except Exception as e:
+    print(f"[IMPORT Matchmaking ERROR] {e}")
+    def add_to_wait(*args, **kwargs): raise RuntimeError("Matchmaking.add_to_wait unavailable")
+    def try_match(*args, **kwargs): return None
+    def start_timeout_watcher(bot=None): return
+    def remove_from_wait(*args, **kwargs): return
 
-# Moderation
 try:
-    from Moderation import is_muted, apply_respect, review_history_and_penalize, check_message_safe
+    from Moderation import is_muted, apply_respect, review_history_and_penalize, check_message_safe, contains_bad_word, censor_text
 except Exception:
+    # fallbacks
     def is_muted(uid): return False
-    def apply_respect(uid, text): return
-    def review_history_and_penalize(uid, pid, history): return None
+    def apply_respect(uid, text): return 0
+    def review_history_and_penalize(uid, pid, history): return (0,0,0,0)
     def check_message_safe(text): return True
+    def contains_bad_word(text): return []
+    def censor_text(text): return text
 
-# messages + delayed_send (fallbacks)
-try:
-    from messages import delayed_send, get_welcome_message, WELCOME, HELP, SEARCHING, NO_MATCH, INTRO_PARTNER, LEAVE_CONFIRM, LEAVE_TOO_SOON, LEFT_YOU, LEFT_PARTNER, REPORT_CONFIRM, REPORT_OK, REPORT_RESULT, MUTED, BANNED
-except Exception:
-    def delayed_send(bot_obj, chat_id, text, **kwargs):
-        bot_obj.send_message(chat_id, text, **kwargs)
-    def get_welcome_message(topic_key="START"):
-        return "👋 أهلاً بك."
-    WELCOME = "مرحباً!"
-    HELP = "مساعدة: استخدم الأزرار."
-    SEARCHING = "🔎 جاري البحث..."
-    NO_MATCH = "لم نجد شريكًا الآن."
-    INTRO_PARTNER = "لقد تمّ ربطك بشريك — ابدأ المحادثة!"
-    LEAVE_CONFIRM = "هل أنت متأكد أنك تريد المغادرة؟"
-    LEAVE_TOO_SOON = "لا يمكنك المغادرة الآن. انتظر {remain} ثانية."
-    LEFT_YOU = "شريكك غادر المحادثة."
-    LEFT_PARTNER = "لقد غادرت الدردشة."
-    REPORT_CONFIRM = "هل تريد تأكيد الإبلاغ؟"
-    REPORT_OK = "تم استلام الإبلاغ."
-    REPORT_RESULT = "نتيجة الإبلاغ: {lines} أسطر."
-    MUTED = "محظور مؤقتًا. تبقى {left} ثانية."
-    BANNED = "لقد تم حظرك من النظام."
-
-# Bad_word (إن وُجد)
-try:
-    from Bad_word import contains_bad_word, censor_text
-except Exception:
-    def contains_bad_word(text):
-        return False
-    def censor_text(text):
-        return text
-
-# ---------- إعداد البوت ----------
-TOKEN = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("BOT_TOKEN") or getattr(__import__("config"), "TOKEN", None) if os.path.exists("config.py") else None
+# إعداد البوت
+TOKEN = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("BOT_TOKEN") or (getattr(config, "TOKEN", None) if hasattr(config, "TOKEN") else None)
 if not TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN / BOT_TOKEN غير معرف في environment أو config.TOKEN")
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 app = Flask(__name__)
 
-# ---------- ثوابت حالات ----------
+# ثوابت حالات
 STATE_REGISTER_NAME = "REGISTER_NAME"
 STATE_REGISTER_GENDER = "REGISTER_GENDER"
 STATE_REGISTER_AGE = "REGISTER_AGE"
@@ -104,7 +58,7 @@ STATE_SEARCHING = "SEARCHING"
 STATE_CONFIRM_LEAVE = "CONFIRM_LEAVE"
 STATE_CONFIRM_REPORT = "CONFIRM_REPORT"
 
-# ---------- كيبوردات مساعدة ----------
+# كيبوردات مساعدة
 def main_menu(in_chat: bool = False) -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("👤 ملفي"))
@@ -112,14 +66,13 @@ def main_menu(in_chat: bool = False) -> ReplyKeyboardMarkup:
     kb.add(KeyboardButton("🔍 البحث عن دردشة"))
     if in_chat:
         kb.add(KeyboardButton("🚨 إبلاغ"), KeyboardButton("🚪 مغادرة الدردشة"))
-    # زر المساعدة أصبح "تواصل مع الدعم"
     kb.add(KeyboardButton("تواصل مع الدعم"))
     return kb
 
 def topics_menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     try:
-        from config import TOPICS
+        TOPICS = getattr(config, "TOPICS", ["عام"])
         for i in range(0, len(TOPICS), 2):
             row = [KeyboardButton(TOPICS[i])]
             if i+1 < len(TOPICS):
@@ -131,13 +84,13 @@ def topics_menu():
 
 def gender_menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for g in getattr(__import__("config"), "GENDERS", ["ذكر", "أنثى"]):
+    for g in getattr(config, "GENDERS", ["ذكر", "أنثى"]):
         kb.add(KeyboardButton(g))
     return kb
 
 def target_gender_menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for tg in getattr(__import__("config"), "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"]):
+    for tg in getattr(config, "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"]):
         kb.add(KeyboardButton(tg))
     return kb
 
@@ -146,41 +99,32 @@ def yes_no_menu():
     kb.add(KeyboardButton("نعم ✅"), KeyboardButton("لا ❌"))
     return kb
 
-# ---------- تحميل المستخدمين ----------
+# تحميل المستخدمين عند بدء التشغيل
 try:
     load_users()
 except Exception as e:
     print(f"[LOAD_USERS ERROR] {e}")
 
-# ---------- امتدادات لضمان الحقول الأساسية (نقاط، إحالة) ----------
+# امتدادات لضمان الحقول الأساسية
 def ensure_user_extended(uid: int):
-    """
-    نستخدم ensure_user من profile_manager ثم نضمن الحقول الإضافية المطلوبة
-    دون تغيير دوال profile الأصلية.
-    """
     u = ensure_user(uid)
-    # حقول جاهزة للنقاط والإحالات (قابلة للتفعيل لاحقًا)
     if "points" not in u:
-        u["points"] = u.get("points", 100)  # المستخدم الجديد يحصل 100 نقطة
+        u["points"] = u.get("points", 100)
     if "referrer" not in u:
         u["referrer"] = u.get("referrer", None)
     if "referral_code" not in u:
         u["referral_code"] = u.get("referral_code", None)
-    # state default
     if "state" not in u:
         u["state"] = None
-    # ensure basic fields exist to avoid KeyError
     u.setdefault("partner", None)
     u.setdefault("history", [])
     save_users()
     return u
 
-# ---------- دوال مساعدة ----------
+# دوال مساعدة
 def update_user(uid: int, updates: dict):
     try:
-        u = ensure_user(uid)
-        u.update(updates)
-        save_users()
+        update_user_dict(uid, updates)
     except Exception as e:
         print(f"[UPDATE_USER ERROR] {e} | uid={uid} | updates={updates}")
         print(traceback.format_exc())
@@ -195,7 +139,6 @@ def safe_send(uid: int, text: str, **kwargs):
             print(f"[SEND ERROR] {e} | uid={uid} | preview={str(text)[:120]}")
 
 def remove_kb(uid: int, text: str = None):
-    """أرسل رسالة واخفي الكيبورد (لمنع زر القائمة من البقاء ظاهراً داخل المحادثة)"""
     try:
         if text:
             safe_send(uid, text, reply_markup=ReplyKeyboardRemove())
@@ -205,12 +148,10 @@ def remove_kb(uid: int, text: str = None):
         print(f"[remove_kb ERROR] {e}")
 
 def partner_profile_text(pid: int):
-    """إنشئ نص تعريف الشريك (اسم، عمر، جنس، احترام)"""
     try:
         p = users.get(pid)
         if not p:
             return "معلومات الشريك غير متوفرة."
-        # استخدم profile_text لكنه يعرض اسم المستخدم نفسه؛ نريد صيغة مختصرة
         name = p.get("name") or "غير محدد"
         age = p.get("age") or "غير محدد"
         gender = p.get("gender") or "غير محدد"
@@ -220,19 +161,23 @@ def partner_profile_text(pid: int):
         print(f"[partner_profile_text ERROR] {e}")
         return "معلومات الشريك غير متوفرة."
 
-# ---------- المعالجات ----------
-
+# معالجات الأوامر
 @bot.message_handler(commands=["start"])
 def cmd_start(m: Message):
     uid = m.from_user.id
     ensure_user_extended(uid)
     print(f"[START] user={uid}")
     try:
-        safe_send(uid, get_welcome_message("START"))
+        wm = get_welcome_message("START")
+        safe_send(uid, wm)
+        # ستيكر ترحيبي عام (حاول إرساله، قد يفشل إذا file_id غير صالح)
+        try:
+            bot.send_sticker(uid, STICKERS.get("welcome_general"))
+        except Exception:
+            pass
     except Exception as e:
         print(f"[WELCOME SEND ERROR] {e}")
     update_user(uid, {"state": STATE_REGISTER_NAME})
-    # أرسل سؤال الاسم مع إزالة أي كيبورد سابق
     safe_send(uid, "✏️ ما اسمك؟", reply_markup=ReplyKeyboardRemove())
 
 @bot.message_handler(commands=["profile"])
@@ -240,15 +185,14 @@ def cmd_profile(m: Message):
     uid = m.from_user.id
     ensure_user_extended(uid)
     u = users[uid]
-    safe_send(uid, profile_text(u), reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+    safe_send(uid, ProfileManager.profile_text(u), reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
 @bot.message_handler(commands=["help", "support"])
 def cmd_support(m: Message):
     uid = m.from_user.id
     ensure_user_extended(uid)
-    # زِدنا زر "تواصل مع الدعم" في الواجهة، لكن كأمر نعيد رسالة الدعم هنا
     support_handle = "@MAA2857"
-    safe_send(uid, f"للتواصل مع الدعم تواصل عبر: {support_handle}\nأو أرسل رسالة هنا وسنقوم بالرد إن أمكن.")
+    safe_send(uid, f"للتواصل مع الدعم تواصل عبر: {support_handle}\nأو أرسل رسالة هنا وسنحاول الرد إن أمكن.")
 
 @bot.message_handler(commands=["search", "chat", "find"])
 def cmd_search(m: Message):
@@ -267,7 +211,7 @@ def cmd_report(m: Message):
     update_user(uid, {"state": STATE_CONFIRM_REPORT})
     safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
 
-# التقاط أي نص (بما في ذلك أزرار لوحة المفاتيح)
+# الالتقاط العام للنص
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
 def on_text(m: Message):
     uid = m.from_user.id
@@ -275,31 +219,27 @@ def on_text(m: Message):
     ensure_user_extended(uid)
     u = users[uid]
     if u.get("banned_full"):
+        safe_send(uid, BANNED)
         return
-
     state = u.get("state") or ""
     print(f"[MSG] from={uid} state={state} text={txt[:120]}")
 
-    # --- قبل أي شيء: اعترض أزرار مهمة حتى لو كُنّا داخل محادثة ---
     # زر "تواصل مع الدعم"
     if txt == "تواصل مع الدعم":
         support_handle = "@MAA2857"
-        safe_send(uid, f"للتواصل مع الدعم: {support_handle}\nأخبرنا بالمشكلة وسنعاود الاتصال.")
+        safe_send(uid, f"للتواصل مع الدعم: {support_handle}\nأخبرنا بالمشكلة وسنراجعها.")
         return
 
-    # زر "🚪 مغادرة الدردشة" أو "🚨 إبلاغ" يجب أن يعالج محلياً، لا يمرّر للشريك
+    # اعتراض أزرار المغادرة/إبلاغ
     if txt == "🚪 مغادرة الدردشة":
-        # استدعي مسار المغادرة كما لو أنه أمر
         handle_leave_request(uid)
         return
-
     if txt == "🚨 إبلاغ":
-        # استدعي مسار الإبلاغ
         update_user(uid, {"state": STATE_CONFIRM_REPORT})
         safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
         return
 
-    # --- حالات التسجيل (name -> gender -> age) ---
+    # حالات التسجيل
     if state == STATE_REGISTER_NAME:
         return handle_register_name(uid, txt)
     if state == STATE_REGISTER_GENDER:
@@ -307,67 +247,65 @@ def on_text(m: Message):
     if state == STATE_REGISTER_AGE:
         return handle_register_age(uid, txt)
 
-    # --- تعديل ---
+    # تعديل
     if state == STATE_EDIT_NAME:
         return handle_edit_name(uid, txt)
     if state == STATE_EDIT_AGE:
         return handle_edit_age(uid, txt)
 
-    # --- اختيار موضوع وجنس هدف ---
+    # اختيار موضوع وهدف
     if state == STATE_CHOOSE_TOPIC:
         return handle_topic_selection(uid, txt)
     if state == STATE_CHOOSE_TARGET_GENDER:
         return handle_target_gender(uid, txt)
 
-    # --- تأكيد مغادرة / إبلاغ (نعم/لا) ---
+    # تأكيد مغادرة/ابلاغ
     if state == STATE_CONFIRM_LEAVE:
         return handle_leave_confirm(uid, u, txt)
     if state == STATE_CONFIRM_REPORT:
         return handle_report_text_confirm(uid, u, txt)
 
-    # --- أوامر من القائمة الرئيسية ---
+    # قائمة رئيسية
     if txt == "👤 ملفي":
-        safe_send(uid, profile_text(u), reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+        safe_send(uid, ProfileManager.profile_text(u), reply_markup=main_menu(in_chat=bool(u.get("partner"))))
         return
-
     if txt == "✏️ تعديل الاسم":
         update_user(uid, {"state": STATE_EDIT_NAME})
         safe_send(uid, "✏️ أرسل الاسم الجديد:", reply_markup=ReplyKeyboardRemove())
         return
-
     if txt == "🎂 تعديل العمر":
         update_user(uid, {"state": STATE_EDIT_AGE})
         safe_send(uid, "🎂 أرسل العمر الجديد (10–120):", reply_markup=ReplyKeyboardRemove())
         return
-
     if txt == "🆘 مساعدة":
-        # احتفظت بدعم قديم - لكن زر الآن هو "تواصل مع الدعم"
         support_handle = "@MAA2857"
         safe_send(uid, f"تواصل مع الدعم: {support_handle}")
         return
-
     if txt == "🔍 البحث عن دردشة":
         handle_search_request(uid)
         return
 
-    # --- إذا المستخدم داخل دردشة: اعترض الأزرار أعلاه أولاً ثم مرّر باقي النصوص ---
+    # إذا المستخدم داخل دردشة، مرّر للمعالجة الخاصة بالدردشة
     if u.get("partner"):
         return handle_chat_message(uid, txt, u)
 
-    # --- افتراضي ---
+    # افتراضي
     safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", reply_markup=main_menu(in_chat=False))
 
-# ----------------------
 # دوال التسجيل خطوة بخطوة
-# ----------------------
 def handle_register_name(uid: int, txt: str):
     try:
-        ok = set_user_name(uid, txt)
+        ok = ProfileManager.set_user_name(uid, txt)
         if not ok:
             safe_send(uid, "❌ الاسم غير صالح. استخدم 2–30 حرفًا (حروف ومسافات فقط). حاول مرة أخرى:")
             return
         update_user(uid, {"state": STATE_REGISTER_GENDER})
         safe_send(uid, f"✅ تم حفظ الاسم: {users[uid].get('name')}")
+        # ستيكر بعد إدخال الاسم
+        try:
+            bot.send_sticker(uid, STICKERS.get("after_name"))
+        except Exception:
+            pass
         safe_send(uid, "💡 اختر جنسك (مرة واحدة):", reply_markup=gender_menu())
     except Exception as e:
         print(f"[handle_register_name ERROR] {e}")
@@ -377,11 +315,11 @@ def handle_register_name(uid: int, txt: str):
 def handle_register_gender(uid: int, txt: str):
     try:
         txt = txt.strip()
-        valid = getattr(__import__("config"), "GENDERS", ["ذكر", "أنثى"])
+        valid = getattr(config, "GENDERS", ["ذكر", "أنثى"])
         if txt not in valid:
             safe_send(uid, "❌ اختر: ذكر / أنثى", reply_markup=gender_menu())
             return
-        ok = set_user_gender(uid, txt)
+        ok = ProfileManager.set_user_gender(uid, txt)
         if not ok:
             safe_send(uid, "❌ اختيار غير صالح. اختر: ذكر / أنثى", reply_markup=gender_menu())
             return
@@ -395,7 +333,7 @@ def handle_register_gender(uid: int, txt: str):
 
 def handle_register_age(uid: int, txt: str):
     try:
-        ok = set_user_age(uid, txt)
+        ok = ProfileManager.set_user_age(uid, txt)
         if not ok:
             safe_send(uid, "❌ العمر غير صالح. أرسل رقمًا بين 10 و120:")
             return
@@ -407,12 +345,10 @@ def handle_register_age(uid: int, txt: str):
         print(traceback.format_exc())
         safe_send(uid, "❌ حدث خطأ أثناء حفظ العمر. حاول مرة أخرى.")
 
-# ---------------------------
-# دوال التعديل (الاسم/العمر)
-# ---------------------------
+# دوال التعديل
 def handle_edit_name(uid: int, txt: str):
     try:
-        ok = set_user_name(uid, txt)
+        ok = ProfileManager.set_user_name(uid, txt)
         if not ok:
             safe_send(uid, "❌ الاسم غير صالح. حاول مجددًا:")
             return
@@ -425,7 +361,7 @@ def handle_edit_name(uid: int, txt: str):
 
 def handle_edit_age(uid: int, txt: str):
     try:
-        ok = set_user_age(uid, txt)
+        ok = ProfileManager.set_user_age(uid, txt)
         if not ok:
             safe_send(uid, "❌ العمر غير صالح. أرسل رقمًا بين 10 و120:")
             return
@@ -436,9 +372,7 @@ def handle_edit_age(uid: int, txt: str):
         print(traceback.format_exc())
         safe_send(uid, "❌ حدث خطأ أثناء تعديل العمر.")
 
-# ---------------------------
-# البحث والمطابقة (مع تعريف الشريك)
-# ---------------------------
+# البحث والمطابقة
 def handle_search_request(uid: int):
     ensure_user_extended(uid)
     u = users[uid]
@@ -451,7 +385,7 @@ def handle_search_request(uid: int):
 def handle_topic_selection(uid: int, txt: str):
     txt = txt.strip()
     try:
-        from config import TOPICS
+        TOPICS = getattr(config, "TOPICS", ["عام"])
     except Exception:
         TOPICS = ["عام"]
     if txt not in TOPICS:
@@ -462,12 +396,11 @@ def handle_topic_selection(uid: int, txt: str):
 
 def handle_target_gender(uid: int, txt: str):
     txt = txt.strip()
-    valid = getattr(__import__("config"), "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"])
+    valid = getattr(config, "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"])
     if txt not in valid:
         safe_send(uid, f"❌ اختر: {' / '.join(valid)}", reply_markup=target_gender_menu())
         return
 
-    # تحويل لتمثيل داخلي
     if "رجل" in txt:
         target = "male"
     elif "امرأة" in txt or "امرأ" in txt:
@@ -478,8 +411,7 @@ def handle_target_gender(uid: int, txt: str):
     u = users[uid]
     topic = u.get("topic")
     update_user(uid, {"target_gender": target, "state": STATE_SEARCHING})
-
-    # أضف إلى الانتظار وجرب المطابقة
+    # أضف إلى الانتظار
     try:
         add_to_wait(topic, uid, target)
     except Exception:
@@ -488,57 +420,51 @@ def handle_target_gender(uid: int, txt: str):
         except Exception as e:
             print(f"[add_to_wait ERROR] {e}")
 
-    # حاول المطابقة
+    # رسالة البحث (لا نعلن الفشل فوراً)
+    safe_send(uid, SEARCHING, reply_markup=ReplyKeyboardRemove())
+
+    # حاول المطابقة فوراً
     partner = None
     try:
         partner = try_match(uid, topic)
-    except Exception:
-        try:
-            partner = try_match(uid, topic, target)
-        except Exception as e:
-            print(f"[try_match ERROR] {e}")
+    except Exception as e:
+        print(f"[try_match ERROR] {e}")
 
     if partner:
         try:
             pid = int(partner)
-            # ضبط شركاء بعضهما
             update_user(uid, {"partner": pid, "state": None, "chat_started_at": time.time()})
             update_user(pid, {"partner": uid, "state": None, "chat_started_at": time.time()})
-            # تجهيز history
             try:
-                start_history(users[uid])
-                start_history(users[pid])
+                ProfileManager.start_history(users[uid])
+                ProfileManager.start_history(users[pid])
             except Exception:
                 pass
-            # أرسل تعريف الشريك لكلا الطرفين ثم أزل لوحة المفاتيح لمنع الإرسال كسجل
             safe_send(uid, partner_profile_text(pid), reply_markup=ReplyKeyboardRemove())
             safe_send(pid, partner_profile_text(uid), reply_markup=ReplyKeyboardRemove())
-            # بعد ذلك أعرض لوحة داخل الدردشة مع أزرار مناسبة (in_chat=True)
             safe_send(uid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
             safe_send(pid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
         except Exception as e:
             print(f"[MATCH SETUP ERROR] {e}")
     else:
-        safe_send(uid, NO_MATCH)
+        # يبقى في قائمة الانتظار — watcher سيبلغ المستخدم بعد مرور SEARCH_TIMEOUT
+        pass
 
-    # شغّل watcher للتايم آوت إن وُجد
     try:
         start_timeout_watcher(bot)
-    except Exception:
+    except Exception as e:
         try:
             start_timeout_watcher()
         except Exception as e:
             print(f"[start_timeout_watcher ERROR] {e}")
 
-# ---------------------------
-# مغادرة الدردشة وتهيئة المسار
-# ---------------------------
+# مغادرة الدردشة
 def handle_leave_request(uid: int):
     ensure_user_extended(uid)
     u = users[uid]
     started = u.get("chat_started_at") or 0
     elapsed = time.time() - started
-    leave_delay = getattr(__import__("config"), "LEAVE_DELAY", 30) if os.path.exists("config.py") else 30
+    leave_delay = getattr(config, "LEAVE_DELAY", 30)
     if elapsed < leave_delay:
         safe_send(uid, LEAVE_TOO_SOON.format(remain=int(leave_delay - elapsed)))
         return
@@ -550,17 +476,21 @@ def handle_leave_confirm(uid: int, u: dict, txt: str):
         pid = u.get("partner")
         if pid:
             try:
-                # end_session أو end_session(users[uid], users[pid]) حسب implementation
                 try:
-                    end_session(users[uid], users[pid])
+                    ProfileManager.end_session(users[uid], users[pid])
                 except Exception:
-                    end_session(users.get(uid), users.get(pid))
+                    ProfileManager.end_session(users.get(uid), users.get(pid))
             except Exception:
                 pass
             update_user(uid, {"partner": None, "state": None, "chat_started_at": None})
             update_user(pid, {"partner": None, "state": None, "chat_started_at": None})
             safe_send(uid, "لقد غادرت الدردشة.", reply_markup=main_menu(in_chat=False))
             try:
+                # send sticker to partner that other left
+                try:
+                    bot.send_sticker(pid, STICKERS.get("partner_left"))
+                except Exception:
+                    pass
                 safe_send(pid, "شريكك غادر الدردشة.", reply_markup=main_menu(in_chat=False))
             except Exception:
                 pass
@@ -573,47 +503,55 @@ def handle_leave_confirm(uid: int, u: dict, txt: str):
     else:
         safe_send(uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
 
-# ---------------------------
 # تأكيد الإبلاغ
-# ---------------------------
 def handle_report_text_confirm(uid: int, u: dict, txt: str):
     if txt == "نعم ✅":
         pid = u.get("partner")
         try:
-            result = review_history_and_penalize(uid, pid, u.get("history", []))
+            hist = []
+            if pid and users.get(pid):
+                # مراجعة تاريخ الشريك (أو كلا الطرفين حسب منطقك)
+                hist = users[pid].get("history", [])
+            res = review_history_and_penalize(uid, pid, hist)
+            # res -> (lines, badwords, penalty, new_respect)
         except Exception as e:
             print(f"[review_history_and_penalize ERROR] {e}")
-            result = None
+            res = (0,0,0, users.get(pid, {}).get("respect", "—") if pid else "—")
         update_user(uid, {"state": None})
         safe_send(uid, REPORT_OK)
-        if result:
-            safe_send(uid, REPORT_RESULT.format(lines=result[0], respect=u.get("respect", "—")))
+        if res:
+            lines, badwords, penalty, new_respect = res
+            safe_send(uid, REPORT_RESULT.format(lines=lines, badwords=badwords, penalty=penalty, new_respect=new_respect))
+            # أخبر الشريك إن وُجد
+            try:
+                if pid:
+                    safe_send(pid, f"🔔 تم تلقي بلاغ ضدك. تم مراجعة المحادثة وخصم {penalty} نقطة احترام. الاحترام الآن: {new_respect}.")
+            except Exception:
+                pass
     elif txt == "لا ❌":
         update_user(uid, {"state": None})
         safe_send(uid, "تم الإلغاء. شكراً لحرصك.")
     else:
         safe_send(uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
         return
-    # بعد الإبلاغ اعرض زر مغادرة لتجنب بقاء الأزرار
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     kb.add(KeyboardButton("🚪 مغادرة الدردشة"))
     safe_send(uid, "هل تريد الآن مغادرة الدردشة؟", reply_markup=kb)
 
-# ---------------------------
-# تمرير الرسائل بين الشركاء (مع اعتراض أزرار)
-# ---------------------------
+# تمرير الرسائل بين الشركاء
 def handle_chat_message(uid: int, txt: str, u: dict):
-    # إذا كانت الرسالة من النوع زر سبق اعتراضه في on_text لكن احتياطاً نتحقق أيضاً هنا
     if txt in ("🚪 مغادرة الدردشة", "🚨 إبلاغ", "تواصل مع الدعم"):
-        # إعادة التوجيه إلى on_text سيقوم بمعالجتها، لذلك فقط رجوع
         return
 
-    if is_muted(uid):
-        safe_send(uid, MUTED.format(left=60))
+    # تحقق الحظر الجزئي
+    if u.get("muted_until") and time.time() < int(u.get("muted_until")):
+        left = int(int(u.get("muted_until")) - time.time())
+        safe_send(uid, MUTED.format(left=left))
         return
 
     try:
-        if contains_bad_word(txt):
+        bad = contains_bad_word(txt)
+        if bad:
             txt_to_send = censor_text(txt)
             safe_send(uid, "⚠️ تم تعديل رسالتك لاحتوائها على كلمات غير لائقة.")
         else:
@@ -638,16 +576,13 @@ def handle_chat_message(uid: int, txt: str, u: dict):
         return
 
     try:
-        # أرسل للآخر مع ظاهر يميزه
         bot.send_message(pid, f"💬 {txt_to_send}")
     except Exception as e:
         print(f"[SEND TO PARTNER ERROR] {e}")
         safe_send(uid, "حدث خطأ أثناء إرسال الرسالة إلى الشريك.")
 
-# ---------------------------
-# Webhook endpoint (Flask)
-# ---------------------------
-@app.route(f"/{getattr(__import__('config'), 'WEBHOOK_PATH', 'webhook')}", methods=["POST"])
+# Webhook endpoint
+@app.route(f"/{getattr(config, 'WEBHOOK_PATH', 'webhook')}", methods=["POST"])
 def webhook():
     try:
         json_str = request.get_data().decode("utf-8")
@@ -658,8 +593,8 @@ def webhook():
     return "", 200
 
 def set_webhook():
-    url = os.environ.get("WEBHOOK_URL") or getattr(__import__("config"), "WEBHOOK_URL", None) if os.path.exists("config.py") else None
-    path = getattr(__import__("config"), "WEBHOOK_PATH", "webhook") if os.path.exists("config.py") else "webhook"
+    url = getattr(config, "WEBHOOK_URL", None)
+    path = getattr(config, "WEBHOOK_PATH", "webhook")
     if not url:
         print("[WEBHOOK] WEBHOOK_URL not set; skipping webhook setup")
         return
@@ -670,16 +605,16 @@ def set_webhook():
     bot.set_webhook(f"{url}/{path}")
     print(f"[WEBHOOK] Set to {url}/{path}")
 
-# تشغيل watcher للتايم آوت
+# شغل watcher للمطابقة
 try:
     start_timeout_watcher(bot)
 except Exception:
     try:
         start_timeout_watcher()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[start_timeout_watcher ERROR] {e}")
 
-# ---------- نقطة التشغيل ----------
+# نقطة التشغيل
 if __name__ == "__main__":
     try:
         load_users()
@@ -689,6 +624,6 @@ if __name__ == "__main__":
         set_webhook()
     except Exception as e:
         print(f"[WEBHOOK ERROR] {e}")
-    port = int(os.environ.get("PORT", getattr(__import__("config"), "PORT", 5000)) if os.path.exists("config.py") else int(os.environ.get("PORT", 5000)))
+    port = int(os.environ.get("PORT", getattr(config, "PORT", 5000)))
     print(f"[RUN] Webhook listening on port {port}…")
     app.run(host="0.0.0.0", port=port)
