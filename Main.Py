@@ -17,20 +17,18 @@ from telebot.types import (
 import storage
 from storage import users, load_users, save_users
 
-# profile manager (حاول profile_manager ثم profile)
-try:
-    import profile_manager as ProfileManager
-    from profile_manager import (
-        ensure_user,
-        set_user_name,
-        set_user_age,
-        set_user_gender,
-        profile_text,
-        start_history,
-        append_history,
-        end_session,
-    )
-
+# profile manager
+import profile_manager as ProfileManager
+from profile_manager import (
+    ensure_user,
+    set_user_name,
+    set_user_age,
+    set_user_gender,
+    profile_text,
+    start_history,
+    append_history,
+    end_session,
+)
 
 # Matchmaking
 try:
