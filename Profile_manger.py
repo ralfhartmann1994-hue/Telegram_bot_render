@@ -7,31 +7,26 @@ NAME_RE = re.compile(r"^[\p{L}\w\s\-]{2,30}$", re.UNICODE) if False else re.comp
 def ensure_user(uid: int):
     return ensure_user(uid)
 
-def set_user_name(uid: int, name: str):
-    name = (name or "").strip()
-    # بسيط: قبول حروف وأرقام ومسافات بين 2 و30
-    if not (2 <= len(name) <= 30):
-        return False
-    update_user_dict(uid, {"name": name})
-    return True
+def set_name(user_id, name):
+    storage.USERS.setdefault(user_id, {})
+    storage.USERS[user_id]["name"] = name
 
-def set_user_age(uid: int, age_txt: str):
-    try:
-        age = int(age_txt)
-        if age < 10 or age > 120:
-            return False
-        update_user_dict(uid, {"age": age})
-        return True
-    except Exception:
-        return False
+def get_name(user_id):
+    return storage.USERS.get(user_id, {}).get("name")
 
-def set_user_gender(uid: int, gender: str):
-    gender = (gender or "").strip()
-    from config import GENDERS
-    if gender not in GENDERS:
-        return False
-    update_user_dict(uid, {"gender": gender})
-    return True
+def set_gender(user_id, gender):
+    storage.USERS.setdefault(user_id, {})
+    storage.USERS[user_id]["gender"] = gender
+
+def get_gender(user_id):
+    return storage.USERS.get(user_id, {}).get("gender")
+
+def set_age(user_id, age):
+    storage.USERS.setdefault(user_id, {})
+    storage.USERS[user_id]["age"] = age
+
+def get_age(user_id):
+    return storage.USERS.get(user_id, {}).get("age")
 
 def profile_text(u: dict):
     name = u.get("name") or "غير محدد"
