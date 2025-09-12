@@ -1,91 +1,97 @@
-# matchmaking.py
-import time, threading
-from typing import Dict, List
-from config import SEARCH_TIMEOUT, TARGET_GENDERS
-from storage import users, save_users
-from messages import NO_MATCH, delayed_send
+# Matchmaking.py
+import threading
+import time
+from typing import List
+from config import SEARCH_TIMEOUT, SEARCH_CHECK_INTERVAL
+from storage import ensure_user, update_user_dict
+import importlib
 
-# waiting[topic] = list of dicts: {uid, target_gender, since}
-waiting: Dict[str, List[dict]] = {}
+_messages = importlib.import_module("messages")
+_wait_lock = threading.RLock()
+_waiting: List[dict] = []  # entries: {"topic", "uid", "target", "ts"}
 
-def add_to_wait(topic: str, uid: int, target_gender: str):
-    if topic not in waiting:
-        waiting[topic] = []
-    # نظّف أي تكرار قديم لنفس المستخدم
-    waiting[topic] = [w for w in waiting[topic] if w["uid"] != uid]
-    waiting[topic].append({"uid": uid, "target_gender": target_gender, "since": time.time()})
-    users[uid]["search_since"] = time.time()
-    users[uid]["topic"] = topic
-    users[uid]["search_pref"] = target_gender
-    save_users()
+def add_to_wait(topic, uid, target="any"):
+    with _wait_lock:
+        # prevent duplicate entries
+        for e in _waiting:
+            if e["uid"] == uid:
+                e.update({"topic": topic, "target": target, "ts": time.time()})
+                return
+        _waiting.append({"topic": topic, "uid": uid, "target": target, "ts": time.time()})
 
-def remove_from_wait(uid: int):
-    for t in list(waiting.keys()):
-        waiting[t] = [w for w in waiting[t] if w["uid"] != uid]
+def remove_from_wait(uid):
+    with _wait_lock:
+        for i, e in enumerate(list(_waiting)):
+            if e["uid"] == uid:
+                _waiting.pop(i)
+                return True
+    return False
 
-def target_matches(me_wants: str, partner_gender: str) -> bool:
-    if me_wants == "أي":
-        return True
-    if me_wants == "👨 رجل":
-        return partner_gender == "ذكر"
-    if me_wants == "👩 امرأة":
-        return partner_gender == "أنثى"
-    return True
-
-def try_match(uid: int, topic: str) -> int | None:
-    """محاولة مطابقة فورية ضمن نفس الموضوع بشرط تفضيلات الجنس المتبادلة."""
-    me = users.get(uid)
-    if not me:
-        return None
-    me_wants = me.get("search_pref")
-    my_gender = me.get("gender")
-    if topic not in waiting:
-        return None
-
-    for i, w in enumerate(waiting[topic]):
-        other_id = w["uid"]
-        if other_id == uid:
-            continue
-        other = users.get(other_id)
-        if not other:
-            continue
-        # تحقق تفضيلات الجنس المتبادلة
-        if not target_matches(me_wants, other.get("gender") or ""):
-            continue
-        other_wants = other.get("search_pref") or "أي"
-        if not target_matches(other_wants, my_gender or ""):
-            continue
-        # مطابقة!
-        waiting[topic].pop(i)
-        remove_from_wait(uid)
-        return other_id
+def try_match(uid, topic):
+    with _wait_lock:
+        me = None
+        for e in _waiting:
+            if e["uid"] == uid:
+                me = e
+                break
+        if not me:
+            return None
+        # Try find match (FIFO)
+        for e in _waiting:
+            if e is me:
+                continue
+            if e["topic"] == me["topic"]:
+                # simple matching ignoring target for now (can expand)
+                partner_uid = e["uid"]
+                # remove both from waiting
+                try:
+                    _waiting.remove(me)
+                except ValueError:
+                    pass
+                try:
+                    _waiting.remove(e)
+                except ValueError:
+                    pass
+                return partner_uid
     return None
 
-def start_timeout_watcher(bot):
-    """خيط خفيف يفحص من تجاوز 30 دقيقة ويرسِل له رسالة عدم وجود شريك."""
-    def loop():
-        while True:
-            now = time.time()
-            for t, lst in list(waiting.items()):
-                expired = [w for w in lst if now - w["since"] >= SEARCH_TIMEOUT]
-                if not expired:
-                    continue
-                for w in expired:
-                    uid = w["uid"]
-                    # نظّف من الانتظار
-                    remove_from_wait(uid)
-                    u = users.get(uid)
-                    if u and not u.get("partner"):
-                        # أرسل له رسالة عدم العثور
-                        try:
-                            delayed_send(bot, uid, NO_MATCH, delay=0.6)
-                        except Exception as e:
-                            print(f"[TIMEOUT MSG] {e}")
-                        u["search_since"] = None
-                        u["search_pref"] = None
-                        save_users()
-                # أبقِ فقط من لم ينته وقتهم
-                waiting[t] = [w for w in lst if now - w["since"] < SEARCH_TIMEOUT]
-            time.sleep(10)
-    th = threading.Thread(target=loop, daemon=True)
-    th.start()
+# watcher thread
+_watcher = None
+_stop_event = None
+
+def _watcher_thread(bot=None, stop_event=None):
+    while not stop_event.is_set():
+        now = time.time()
+        timed_out = []
+        with _wait_lock:
+            for e in list(_waiting):
+                if now - e["ts"] >= SEARCH_TIMEOUT:
+                    timed_out.append(e)
+        for e in timed_out:
+            with _wait_lock:
+                try:
+                    _waiting.remove(e)
+                except Exception:
+                    pass
+            try:
+                if bot:
+                    bot.send_message(e["uid"], _messages.NO_MATCH + "\n\n🔁 جرّب مرة أخرى — سنحاول العثور على شريك لاحقاً.")
+                else:
+                    print(f"[Matchmaking] timeout notify {e['uid']}")
+                update_user_dict(e["uid"], {"state": None})
+            except Exception as ex:
+                print(f"[Matchmaking notify ERROR] {ex}")
+        stop_event.wait(SEARCH_CHECK_INTERVAL)
+
+def start_timeout_watcher(bot=None):
+    global _watcher, _stop_event
+    if _watcher and _watcher.is_alive():
+        return
+    _stop_event = threading.Event()
+    _watcher = threading.Thread(target=_watcher_thread, args=(bot, _stop_event), daemon=True)
+    _watcher.start()
+
+def stop_timeout_watcher():
+    global _stop_event
+    if _stop_event:
+        _stop_event.set()
