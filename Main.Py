@@ -220,10 +220,14 @@ def cmd_report(m: Message):
     safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
 
 # الالتقاط العام للنص - هنا المشكلة والحل
+# استبدال معالج الرسائل الحالي بهذا المعالج المحسن
+
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
 def on_text(m: Message):
     uid = m.from_user.id
     txt = (m.text or "").strip()
+    
+    # تأكد من وجود المستخدم
     ensure_user_extended(uid)
     u = users[uid]
     
@@ -232,16 +236,19 @@ def on_text(m: Message):
         return
         
     state = u.get("state") or ""
-    print(f"[MSG] from={uid} state={state} text={txt[:120]}")
+    print(f"[MSG DEBUG] from={uid} state='{state}' text='{txt[:50]}...'")
 
-    # معالجة حالات التسجيل أولاً (هذا هو الحل)
+    # **معالجة حالات التسجيل أولاً - هذا هو الحل الرئيسي**
     if state == STATE_REGISTER_NAME:
+        print(f"[DEBUG] Processing register name for uid={uid}")
         handle_register_name(uid, txt)
         return
     elif state == STATE_REGISTER_GENDER:
+        print(f"[DEBUG] Processing register gender for uid={uid}")
         handle_register_gender(uid, txt)
         return
     elif state == STATE_REGISTER_AGE:
+        print(f"[DEBUG] Processing register age for uid={uid}")
         handle_register_age(uid, txt)
         return
 
@@ -269,13 +276,12 @@ def on_text(m: Message):
         handle_report_text_confirm(uid, u, txt)
         return
 
-    # زر "تواصل مع الدعم"
+    # معالجة الأزرار العادية (بعد معالجة الحالات)
     if txt == "تواصل مع الدعم":
         support_handle = "@MAA2857"
         safe_send(uid, f"للتواصل مع الدعم: {support_handle}\nأخبرنا بالمشكلة وسنراجعها.")
         return
 
-    # اعتراض أزرار المغادرة/إبلاغ
     if txt == "🚪 مغادرة الدردشة":
         handle_leave_request(uid)
         return
@@ -305,12 +311,12 @@ def on_text(m: Message):
         handle_search_request(uid)
         return
 
-    # إذا المستخدم داخل دردشة، مرّر للمعالجة الخاصة بالدردشة
+    # إذا المستخدم داخل دردشة
     if u.get("partner"):
         handle_chat_message(uid, txt, u)
         return
 
-    # افتراضي
+    # افتراضي - إذا لم يكن هناك state ولا partner
     safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", 
              reply_markup=main_menu(in_chat=False))
 
