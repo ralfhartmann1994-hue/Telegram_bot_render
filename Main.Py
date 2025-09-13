@@ -18,7 +18,7 @@ from stickers import STICKERS
 
 # ملفات المشروع
 import storage
-from storage import users, load_users, save_users, ensure_user, update_user_dict, append_history
+from storage import load_users, save_users, ensure_user, update_user_dict, append_history
 import Profile_manger as ProfileManager
 
 # Matchmaking + Moderation (مع معالجة fallbacks)
@@ -114,8 +114,11 @@ except Exception as e:
 # امتدادات لضمان الحقول الأساسية
 def ensure_user_extended(uid: int):
     u = ensure_user(uid)
+    # تغيير نقاط الاحترام إلى 80 بدلاً من 100
     if "points" not in u:
-        u["points"] = u.get("points", 100)
+        u["points"] = u.get("points", 80)
+    if "respect" not in u:
+        u["respect"] = u.get("respect", 80)
     if "referrer" not in u:
         u["referrer"] = u.get("referrer", None)
     if "referral_code" not in u:
@@ -130,7 +133,13 @@ def ensure_user_extended(uid: int):
 # دوال مساعدة
 def update_user(uid: int, updates: dict):
     try:
-        update_user_dict(uid, updates)
+        # استخدم storage.users مباشرة
+        if uid not in storage.users:
+            ensure_user_extended(uid)
+        for key, value in updates.items():
+            storage.users[uid][key] = value
+        storage.save_users()
+        print(f"[UPDATE_USER] Success for uid={uid}, updates={updates}")
     except Exception as e:
         print(f"[UPDATE_USER ERROR] {e} | uid={uid} | updates={updates}")
         print(traceback.format_exc())
@@ -152,7 +161,7 @@ def safe_send_sticker(uid: int, sticker_id: str):
 
 def partner_profile_text(pid: int):
     try:
-        p = users.get(pid)
+        p = storage.users.get(pid)
         if not p:
             return "معلومات الشريك غير متوفرة."
         name = p.get("name") or "غير محدد"
@@ -165,9 +174,6 @@ def partner_profile_text(pid: int):
         return "معلومات الشريك غير متوفرة."
 
 # معالجات الأوامر
-
-# استبدل دالة cmd_start بهذه النسخة المحسنة التي تحل مشكلة الـ state
-
 @bot.message_handler(commands=['start'])
 def cmd_start(message: Message):
     uid = message.from_user.id
@@ -189,10 +195,9 @@ def cmd_start(message: Message):
         except Exception as e:
             print(f"[START] Sticker error: {e}")
 
-        # بدء خطوة التسجيل بالاسم - مع التأكد من الحفظ
+        # بدء خطوة التسجيل بالاسم
         print(f"[START] About to set state to REGISTER_NAME")
         
-        # استخدم storage مباشرة بدلاً من update_user
         try:
             storage.users[uid]["state"] = STATE_REGISTER_NAME
             storage.save_users()
@@ -222,7 +227,7 @@ def cmd_start(message: Message):
 def cmd_profile(m: Message):
     uid = m.from_user.id
     ensure_user_extended(uid)
-    u = users[uid]
+    u = storage.users[uid]
     safe_send(uid, ProfileManager.profile_text(u), 
              reply_markup=main_menu(in_chat=bool(u.get("partner"))))
 
@@ -247,11 +252,11 @@ def cmd_leave(m: Message):
 def cmd_report(m: Message):
     uid = m.from_user.id
     ensure_user_extended(uid)
-    update_user(uid, {"state": STATE_CONFIRM_REPORT})
+    storage.users[uid]["state"] = STATE_CONFIRM_REPORT
+    storage.save_users()
     safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
 
-# استبدل دالة on_text بهذه النسخة مع معالجة أخطاء أفضل
-
+# معالج الرسائل النصية المُصحح
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
 def on_text(m: Message):
     try:
@@ -260,10 +265,7 @@ def on_text(m: Message):
         
         print(f"[MESSAGE RECEIVED] uid={uid}, text='{txt}'")
         
-        # تأكد من وجود المستخدم
         ensure_user_extended(uid)
-        
-        # احصل على المستخدم مباشرة من storage
         u = storage.users.get(uid, {})
         print(f"[USER DATA] uid={uid}, user={u}")
         
@@ -367,8 +369,7 @@ def on_text(m: Message):
         print(f"[ON_TEXT ERROR] {e}")
         print(traceback.format_exc())
 
-# وأيضاً استبدل handle_register_name بهذه النسخة المحسنة
-
+# دوال التسجيل المُصححة
 def handle_register_name(uid: int, txt: str):
     print(f"[REGISTER_NAME START] uid={uid}, text='{txt}'")
     
@@ -376,58 +377,27 @@ def handle_register_name(uid: int, txt: str):
         safe_send(uid, "❌ الاسم غير صالح، استخدم 2–30 حرفًا. حاول مرة أخرى:")
         return
 
-# ---------- دوال التسجيل (مبسطة بدون next_step_handler) ----------
-
-# استبدل دوال التسجيل الحالية بهذه النسخة المحسنة
-
-def handle_register_name(uid: int, txt: str):
-    print(f"[REGISTER_NAME] START - uid={uid}, text='{txt}'")
-    
-    # التحقق من صحة الاسم
-    if len(txt) < 2 or len(txt) > 30:
-        print(f"[REGISTER_NAME] Invalid name length: {len(txt)}")
-        safe_send(uid, "❌ الاسم غير صالح، استخدم 2–30 حرفًا. حاول مرة أخرى:")
-        return
-
     try:
-        # محاولة حفظ الاسم
-        print(f"[REGISTER_NAME] Attempting to save name: '{txt}'")
+        # حفظ الاسم مباشرة في storage
+        storage.users[uid]["name"] = txt
+        storage.users[uid]["state"] = STATE_REGISTER_GENDER
+        storage.save_users()
         
-        # التأكد من وجود ProfileManager
-        if not hasattr(ProfileManager, 'set_name'):
-            print(f"[REGISTER_NAME] ERROR: ProfileManager.set_name not found!")
-            # fallback - حفظ مباشر
-            update_user(uid, {"name": txt})
-        else:
-            ProfileManager.set_name(uid, txt)
+        print(f"[REGISTER_NAME] Name and state saved successfully")
         
-        print(f"[REGISTER_NAME] Name saved successfully")
-        
-        # الانتقال للمرحلة التالية
-        update_user(uid, {"state": STATE_REGISTER_GENDER})
-        print(f"[REGISTER_NAME] State updated to: {STATE_REGISTER_GENDER}")
-        
-        # إرسال ستيكر ترحيبي (إذا فشل، لا نتوقف)
+        # إرسال ستيكر بعد الاسم
         try:
-            sticker_id = STICKERS.get("after_name")
-            if sticker_id:
-                safe_send_sticker(uid, sticker_id)
-                print(f"[REGISTER_NAME] Sticker sent")
-            else:
-                print(f"[REGISTER_NAME] No after_name sticker found")
+            safe_send_sticker(uid, STICKERS.get("after_name"))
         except Exception as e:
-            print(f"[REGISTER_NAME] Sticker send error (ignored): {e}")
+            print(f"[REGISTER_NAME] Sticker send error: {e}")
         
         # طلب اختيار الجنس
-        safe_send(uid, f"✅ أهلاً {txt}! 👋\n\n💡 الآن اختر جنسك:", 
-                 reply_markup=gender_menu())
-        
-        print(f"[REGISTER_NAME] Successfully completed for uid={uid}")
+        safe_send(uid, f"✅ أهلاً {txt}! 👋\n\n💡 الآن اختر جنسك:", reply_markup=gender_menu())
         
     except Exception as e:
-        print(f"[handle_register_name] CRITICAL ERROR: {e}")
+        print(f"[handle_register_name ERROR] {e}")
         print(traceback.format_exc())
-        safe_send(uid, "❌ حدث خطأ أثناء حفظ الاسم. حاول مرة أخرى أو أعد تشغيل البوت بـ /start")
+        safe_send(uid, "❌ حدث خطأ أثناء حفظ الاسم. حاول مرة أخرى:")
 
 def handle_register_gender(uid: int, txt: str):
     print(f"[REGISTER_GENDER START] uid={uid}, text='{txt}'")
@@ -439,22 +409,14 @@ def handle_register_gender(uid: int, txt: str):
         return
 
     try:
-        # تأكد من وجود المستخدم
-        ensure_user_extended(uid)
+        storage.users[uid]["gender"] = txt
+        storage.users[uid]["state"] = STATE_REGISTER_AGE
+        storage.save_users()
         
-        # حفظ الجنس
-        success = ProfileManager.set_gender(uid, txt)
-        print(f"[REGISTER_GENDER] ProfileManager.set_gender result: {success}")
+        print(f"[REGISTER_GENDER] Gender and state saved successfully")
         
-        # الانتقال لحالة إدخال العمر
-        update_user(uid, {"state": STATE_REGISTER_AGE})
-        print(f"[REGISTER_GENDER] Updated state to: {STATE_REGISTER_AGE}")
-        
-        # إرسال رسالة طلب العمر
         safe_send(uid, f"✅ تم حفظ الجنس: {txt}\n🎂 ما عمرك؟ (10–120)", 
                  reply_markup=ReplyKeyboardRemove())
-        
-        print(f"[REGISTER_GENDER SUCCESS] uid={uid}")
         
     except Exception as e:
         print(f"[handle_register_gender ERROR] {e}")
@@ -464,35 +426,24 @@ def handle_register_gender(uid: int, txt: str):
 def handle_register_age(uid: int, txt: str):
     print(f"[REGISTER_AGE START] uid={uid}, text='{txt}'")
     
-    # التحقق من أن الإدخال رقم
     try:
         age = int(txt)
     except ValueError:
         safe_send(uid, "❌ من فضلك أدخل العمر كرقم بين 10 و120:")
         return
 
-    # التحقق من أن العمر ضمن النطاق المنطقي
     if age < 10 or age > 120:
         safe_send(uid, "❌ العمر غير منطقي. حاول مرة أخرى (10–120):")
         return
 
     try:
-        # تأكد من وجود المستخدم
-        ensure_user_extended(uid)
+        storage.users[uid]["age"] = age
+        storage.users[uid]["state"] = None
+        storage.save_users()
         
-        # حفظ العمر
-        success = ProfileManager.set_age(uid, age)
-        print(f"[REGISTER_AGE] ProfileManager.set_age result: {success}")
+        print(f"[REGISTER_AGE] Age saved and state cleared successfully")
         
-        # إنهاء حالة التسجيل
-        update_user(uid, {"state": None})
-        print(f"[REGISTER_AGE] Cleared state")
-        
-        # استدعاء المستخدم المحديث
         u = storage.users.get(uid, {})
-        print(f"[REGISTER_AGE] User data: {u}")
-        
-        # إرسال رسالة تأكيد حفظ الملف الشخصي
         profile_msg = PROFILE_SAVED.format(
             name=u.get("name", "غير محدد"),
             gender=u.get("gender", "غير محدد"),
@@ -501,20 +452,15 @@ def handle_register_age(uid: int, txt: str):
         
         safe_send(uid, profile_msg, reply_markup=main_menu(in_chat=False))
         
-        # إرسال ستيكر احتفالي
         try:
             safe_send_sticker(uid, STICKERS.get("registration_complete", STICKERS.get("welcome_general")))
         except Exception as e:
             print(f"[REGISTER_AGE] Sticker error: {e}")
-        
-        print(f"[REGISTER_AGE SUCCESS] uid={uid}")
-        
+            
     except Exception as e:
         print(f"[handle_register_age ERROR] {e}")
         print(traceback.format_exc())
         safe_send(uid, "❌ حدث خطأ أثناء حفظ العمر. حاول مرة أخرى:")
-
-# ---------- باقي الدوال تبقى كما هي ----------
 
 def handle_edit_name(uid: int, txt: str):
     try:
@@ -522,8 +468,10 @@ def handle_edit_name(uid: int, txt: str):
             safe_send(uid, "❌ الاسم غير صالح (2-30 حرف). حاول مجددًا:")
             return
             
-        ProfileManager.set_name(uid, txt)
-        update_user(uid, {"state": None})
+        storage.users[uid]["name"] = txt
+        storage.users[uid]["state"] = None
+        storage.save_users()
+        
         safe_send(uid, f"✅ تم تحديث الاسم إلى: {txt}", 
                  reply_markup=main_menu(in_chat=False))
     except Exception as e:
@@ -537,8 +485,10 @@ def handle_edit_age(uid: int, txt: str):
             safe_send(uid, "❌ العمر غير صالح. أرسل رقمًا بين 10 و120:")
             return
             
-        ProfileManager.set_age(uid, age)
-        update_user(uid, {"state": None})
+        storage.users[uid]["age"] = age
+        storage.users[uid]["state"] = None
+        storage.save_users()
+        
         safe_send(uid, f"✅ تم تحديث العمر إلى: {age}", 
                  reply_markup=main_menu(in_chat=False))
     except Exception as e:
@@ -547,12 +497,16 @@ def handle_edit_age(uid: int, txt: str):
 
 def handle_search_request(uid: int):
     ensure_user_extended(uid)
-    u = users[uid]
+    u = storage.users.get(uid, {})
+    
     if u.get("partner"):
         safe_send(uid, "⚠️ أنت بالفعل في دردشة!", 
                  reply_markup=main_menu(in_chat=True))
         return
-    update_user(uid, {"state": STATE_CHOOSE_TOPIC})
+        
+    storage.users[uid]["state"] = STATE_CHOOSE_TOPIC
+    storage.save_users()
+    
     safe_send(uid, "اختر موضوع النقاش:", reply_markup=topics_menu())
 
 def handle_topic_selection(uid: int, txt: str):
@@ -565,7 +519,10 @@ def handle_topic_selection(uid: int, txt: str):
         safe_send(uid, "❌ اختر موضوعًا صالحًا من القائمة.", reply_markup=topics_menu())
         return
         
-    update_user(uid, {"topic": txt, "state": STATE_CHOOSE_TARGET_GENDER})
+    storage.users[uid]["topic"] = txt
+    storage.users[uid]["state"] = STATE_CHOOSE_TARGET_GENDER
+    storage.save_users()
+    
     safe_send(uid, f"تم اختيار الموضوع: {txt}\nالآن اختر جنس الطرف الذي تريده:", 
              reply_markup=target_gender_menu())
 
@@ -582,9 +539,12 @@ def handle_target_gender(uid: int, txt: str):
     else:
         target = "any"
 
-    u = users[uid]
+    u = storage.users.get(uid, {})
     topic = u.get("topic")
-    update_user(uid, {"target_gender": target, "state": STATE_SEARCHING})
+    
+    storage.users[uid]["target_gender"] = target
+    storage.users[uid]["state"] = STATE_SEARCHING
+    storage.save_users()
     
     # أضف إلى الانتظار
     try:
@@ -605,11 +565,17 @@ def handle_target_gender(uid: int, txt: str):
     if partner:
         try:
             pid = int(partner)
-            update_user(uid, {"partner": pid, "state": None, "chat_started_at": time.time()})
-            update_user(pid, {"partner": uid, "state": None, "chat_started_at": time.time()})
+            storage.users[uid]["partner"] = pid
+            storage.users[uid]["state"] = None
+            storage.users[uid]["chat_started_at"] = time.time()
             
-            ProfileManager.start_history(users[uid])
-            ProfileManager.start_history(users[pid])
+            storage.users[pid]["partner"] = uid
+            storage.users[pid]["state"] = None
+            storage.users[pid]["chat_started_at"] = time.time()
+            storage.save_users()
+            
+            ProfileManager.start_history(storage.users[uid])
+            ProfileManager.start_history(storage.users[pid])
             
             safe_send(uid, partner_profile_text(pid), reply_markup=ReplyKeyboardRemove())
             safe_send(pid, partner_profile_text(uid), reply_markup=ReplyKeyboardRemove())
@@ -625,14 +591,15 @@ def handle_target_gender(uid: int, txt: str):
 
 def handle_leave_request(uid: int):
     ensure_user_extended(uid)
-    u = users[uid]
+    u = storage.users.get(uid, {})
     started = u.get("chat_started_at") or 0
     elapsed = time.time() - started
     leave_delay = getattr(config, "LEAVE_DELAY", 30)
     if elapsed < leave_delay:
         safe_send(uid, LEAVE_TOO_SOON.format(remain=int(leave_delay - elapsed)))
         return
-    update_user(uid, {"state": STATE_CONFIRM_LEAVE})
+    storage.users[uid]["state"] = STATE_CONFIRM_LEAVE
+    storage.save_users()
     safe_send(uid, LEAVE_CONFIRM, reply_markup=yes_no_menu())
 
 def handle_leave_confirm(uid: int, u: dict, txt: str):
@@ -640,12 +607,18 @@ def handle_leave_confirm(uid: int, u: dict, txt: str):
         pid = u.get("partner")
         if pid:
             try:
-                ProfileManager.end_session(users[uid], users[pid])
+                ProfileManager.end_session(storage.users[uid], storage.users[pid])
             except Exception:
                 pass
                 
-            update_user(uid, {"partner": None, "state": None, "chat_started_at": None})
-            update_user(pid, {"partner": None, "state": None, "chat_started_at": None})
+            storage.users[uid]["partner"] = None
+            storage.users[uid]["state"] = None
+            storage.users[uid]["chat_started_at"] = None
+            
+            storage.users[pid]["partner"] = None
+            storage.users[pid]["state"] = None
+            storage.users[pid]["chat_started_at"] = None
+            storage.save_users()
             
             safe_send(uid, "لقد غادرت الدردشة.", reply_markup=main_menu(in_chat=False))
             
@@ -655,10 +628,12 @@ def handle_leave_confirm(uid: int, u: dict, txt: str):
             except Exception:
                 pass
         else:
-            update_user(uid, {"state": None})
+            storage.users[uid]["state"] = None
+            storage.save_users()
             safe_send(uid, "لم يتم العثور على شريك حالي.")
     elif txt == "لا ❌":
-        update_user(uid, {"state": None})
+        storage.users[uid]["state"] = None
+        storage.save_users()
         safe_send(uid, "تم الإلغاء. تابع الدردشة 👌")
     else:
         safe_send(uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
@@ -668,16 +643,18 @@ def handle_report_text_confirm(uid: int, u: dict, txt: str):
         pid = u.get("partner")
         try:
             hist = []
-            if pid and users.get(pid):
-                hist = users[pid].get("history", [])
+            if pid and storage.users.get(pid):
+                hist = storage.users[pid].get("history", [])
             res = review_history_and_penalize(uid, pid, hist)
             lines, badwords, penalty, new_respect = res
         except Exception as e:
             print(f"[review_history_and_penalize ERROR] {e}")
-            res = (0,0,0, users.get(pid, {}).get("respect", "—") if pid else "—")
+            res = (0,0,0, storage.users.get(pid, {}).get("respect", "—") if pid else "—")
             lines, badwords, penalty, new_respect = res
             
-        update_user(uid, {"state": None})
+        storage.users[uid]["state"] = None
+        storage.save_users()
+        
         safe_send(uid, REPORT_OK)
         safe_send(uid, REPORT_RESULT.format(
             lines=lines, badwords=badwords, penalty=penalty, new_respect=new_respect
@@ -691,7 +668,8 @@ def handle_report_text_confirm(uid: int, u: dict, txt: str):
             pass
             
     elif txt == "لا ❌":
-        update_user(uid, {"state": None})
+        storage.users[uid]["state"] = None
+        storage.save_users()
         safe_send(uid, "تم الإلغاء. شكراً لحرصك.")
     else:
         safe_send(uid, "اختر: نعم ✅ / لا ❌", reply_markup=yes_no_menu())
@@ -732,8 +710,9 @@ def handle_chat_message(uid: int, txt: str, u: dict):
         pass
 
     pid = u.get("partner")
-    if not pid or pid not in users:
-        update_user(uid, {"partner": None})
+    if not pid or pid not in storage.users:
+        storage.users[uid]["partner"] = None
+        storage.save_users()
         safe_send(uid, "لا يوجد شريك حالي — عد إلى القائمة.", reply_markup=main_menu(in_chat=False))
         return
 
@@ -785,4 +764,4 @@ if __name__ == "__main__":
         print(f"[WEBHOOK ERROR] {e}")
     port = int(os.environ.get("PORT", getattr(config, "PORT", 5000)))
     print(f"[RUN] Webhook listening on port {port}…")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port) 
