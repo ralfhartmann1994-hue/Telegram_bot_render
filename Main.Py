@@ -165,7 +165,8 @@ def partner_profile_text(pid: int):
         return "معلومات الشريك غير متوفرة."
 
 # معالجات الأوامر
-# استبدل معالج أمر /start بهذا المعالج المحسن
+
+# استبدل دالة cmd_start بهذه النسخة المحسنة التي تحل مشكلة الـ state
 
 @bot.message_handler(commands=['start'])
 def cmd_start(message: Message):
@@ -188,16 +189,22 @@ def cmd_start(message: Message):
         except Exception as e:
             print(f"[START] Sticker error: {e}")
 
-        # بدء خطوة التسجيل بالاسم - هذا مهم جداً
-        update_user(uid, {"state": STATE_REGISTER_NAME})
-        print(f"[START] Set state to: {STATE_REGISTER_NAME}")
+        # بدء خطوة التسجيل بالاسم - مع التأكد من الحفظ
+        print(f"[START] About to set state to REGISTER_NAME")
         
-        # التأكد من حفظ التغييرات
+        # استخدم storage مباشرة بدلاً من update_user
         try:
-            save_users()
-            print(f"[START] Users saved successfully")
+            storage.users[uid]["state"] = STATE_REGISTER_NAME
+            storage.save_users()
+            print(f"[START] State set directly in storage")
+            
+            # تأكد من الحفظ
+            saved_user = storage.users.get(uid, {})
+            print(f"[START] Verification - saved user state: {saved_user.get('state')}")
+            
         except Exception as e:
-            print(f"[START] Save users error: {e}")
+            print(f"[START] Error setting state: {e}")
+            print(traceback.format_exc())
         
         # إرسال رسالة طلب الاسم
         safe_send(uid, "💡 لنبدأ بإنشاء ملفك الشخصي.\n\n👤 ما هو اسمك؟ (2-30 حرف)", 
@@ -210,6 +217,7 @@ def cmd_start(message: Message):
         print(f"[START] Existing user: {u.get('name')}")
         safe_send(uid, f"👋 مرحبًا مجددًا، {u.get('name')}!\n\nماذا تريد أن تفعل اليوم؟", 
                  reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+
 @bot.message_handler(commands=["profile"])
 def cmd_profile(m: Message):
     uid = m.from_user.id
@@ -246,15 +254,17 @@ def cmd_report(m: Message):
 
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
 def on_text(m: Message):
-    uid = m.from_user.id
-    txt = (m.text or "").strip()
-    
-    print(f"[MESSAGE RECEIVED] uid={uid}, text='{txt}'")
-    
     try:
-        # التأكد من وجود المستخدم
+        uid = m.from_user.id
+        txt = (m.text or "").strip()
+        
+        print(f"[MESSAGE RECEIVED] uid={uid}, text='{txt}'")
+        
+        # تأكد من وجود المستخدم
         ensure_user_extended(uid)
-        u = users.get(uid, {})
+        
+        # احصل على المستخدم مباشرة من storage
+        u = storage.users.get(uid, {})
         print(f"[USER DATA] uid={uid}, user={u}")
         
         if u.get("banned_full"):
@@ -266,15 +276,15 @@ def on_text(m: Message):
 
         # معالجة حالات التسجيل أولاً
         if state == STATE_REGISTER_NAME:
-            print(f"[PROCESSING] REGISTER_NAME for uid={uid}")
+            print(f"[REGISTER_NAME MATCH] Processing for uid={uid}")
             handle_register_name(uid, txt)
             return
         elif state == STATE_REGISTER_GENDER:
-            print(f"[PROCESSING] REGISTER_GENDER for uid={uid}")
+            print(f"[REGISTER_GENDER MATCH] Processing for uid={uid}")
             handle_register_gender(uid, txt)
             return
         elif state == STATE_REGISTER_AGE:
-            print(f"[PROCESSING] REGISTER_AGE for uid={uid}")
+            print(f"[REGISTER_AGE MATCH] Processing for uid={uid}")
             handle_register_age(uid, txt)
             return
 
@@ -315,7 +325,8 @@ def on_text(m: Message):
             handle_leave_request(uid)
             return
         if txt == "🚨 إبلاغ":
-            update_user(uid, {"state": STATE_CONFIRM_REPORT})
+            storage.users[uid]["state"] = STATE_CONFIRM_REPORT
+            storage.save_users()
             safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
             return
 
@@ -325,11 +336,13 @@ def on_text(m: Message):
                      reply_markup=main_menu(in_chat=bool(u.get("partner"))))
             return
         elif txt == "✏️ تعديل الاسم":
-            update_user(uid, {"state": STATE_EDIT_NAME})
+            storage.users[uid]["state"] = STATE_EDIT_NAME
+            storage.save_users()
             safe_send(uid, "✏️ أرسل الاسم الجديد:", reply_markup=ReplyKeyboardRemove())
             return
         elif txt == "🎂 تعديل العمر":
-            update_user(uid, {"state": STATE_EDIT_AGE})
+            storage.users[uid]["state"] = STATE_EDIT_AGE
+            storage.save_users()
             safe_send(uid, "🎂 أرسل العمر الجديد (10–120):", reply_markup=ReplyKeyboardRemove())
             return
         elif txt == "🆘 مساعدة":
@@ -342,22 +355,26 @@ def on_text(m: Message):
 
         # إذا المستخدم داخل دردشة، مرّر للمعالجة الخاصة بالدردشة
         if u.get("partner"):
-            print(f"[CHAT MESSAGE] Processing chat message for uid={uid}")
             handle_chat_message(uid, txt, u)
             return
 
-        # افتراضي
         print(f"[DEFAULT] No match found for uid={uid}, text='{txt}'")
+        # افتراضي
         safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", 
                  reply_markup=main_menu(in_chat=False))
-                 
+
     except Exception as e:
-        print(f"[on_text CRITICAL ERROR] {e}")
+        print(f"[ON_TEXT ERROR] {e}")
         print(traceback.format_exc())
-        try:
-            safe_send(uid, "❌ حدث خطأ. حاول مرة أخرى أو أعد تشغيل البوت بـ /start")
-        except:
-            pass
+
+# وأيضاً استبدل handle_register_name بهذه النسخة المحسنة
+
+def handle_register_name(uid: int, txt: str):
+    print(f"[REGISTER_NAME START] uid={uid}, text='{txt}'")
+    
+    if len(txt) < 2 or len(txt) > 30:
+        safe_send(uid, "❌ الاسم غير صالح، استخدم 2–30 حرفًا. حاول مرة أخرى:")
+        return
 
 # ---------- دوال التسجيل (مبسطة بدون next_step_handler) ----------
 
