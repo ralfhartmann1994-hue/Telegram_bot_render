@@ -242,148 +242,175 @@ def cmd_report(m: Message):
     update_user(uid, {"state": STATE_CONFIRM_REPORT})
     safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
 
-# الالتقاط العام للنص - هنا المشكلة والحل
-# استبدال معالج الرسائل الحالي بهذا المعالج المحسن
-
-# استبدل دالة on_text الموجودة بهذه الدالة المُصححة
+# استبدل دالة on_text بهذه النسخة مع معالجة أخطاء أفضل
 
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
 def on_text(m: Message):
     uid = m.from_user.id
     txt = (m.text or "").strip()
     
-    print(f"[MESSAGE RECEIVED] uid={uid}, text='{txt}'")  # debug مهم
+    print(f"[MESSAGE RECEIVED] uid={uid}, text='{txt}'")
     
-    ensure_user_extended(uid)
-    u = users[uid]
-    
-    if u.get("banned_full"):
-        safe_send(uid, BANNED)
-        return
+    try:
+        # التأكد من وجود المستخدم
+        ensure_user_extended(uid)
+        u = users.get(uid, {})
+        print(f"[USER DATA] uid={uid}, user={u}")
         
-    state = u.get("state") or ""
-    print(f"[MSG] from={uid} state='{state}' text={txt[:50]}...")
+        if u.get("banned_full"):
+            safe_send(uid, BANNED)
+            return
+            
+        state = u.get("state") or ""
+        print(f"[STATE CHECK] uid={uid}, state='{state}'")
 
-    # معالجة حالات التسجيل أولاً
-    if state == STATE_REGISTER_NAME:
-        print(f"[DEBUG] Processing REGISTER_NAME for uid={uid}")
-        handle_register_name(uid, txt)
-        return
-    elif state == STATE_REGISTER_GENDER:
-        print(f"[DEBUG] Processing REGISTER_GENDER for uid={uid}")
-        handle_register_gender(uid, txt)
-        return
-    elif state == STATE_REGISTER_AGE:
-        print(f"[DEBUG] Processing REGISTER_AGE for uid={uid}")
-        handle_register_age(uid, txt)
-        return
+        # معالجة حالات التسجيل أولاً
+        if state == STATE_REGISTER_NAME:
+            print(f"[PROCESSING] REGISTER_NAME for uid={uid}")
+            handle_register_name(uid, txt)
+            return
+        elif state == STATE_REGISTER_GENDER:
+            print(f"[PROCESSING] REGISTER_GENDER for uid={uid}")
+            handle_register_gender(uid, txt)
+            return
+        elif state == STATE_REGISTER_AGE:
+            print(f"[PROCESSING] REGISTER_AGE for uid={uid}")
+            handle_register_age(uid, txt)
+            return
 
-    # معالجة حالات التعديل
-    elif state == STATE_EDIT_NAME:
-        handle_edit_name(uid, txt)
-        return
-    elif state == STATE_EDIT_AGE:
-        handle_edit_age(uid, txt)
-        return
+        # معالجة حالات التعديل
+        elif state == STATE_EDIT_NAME:
+            handle_edit_name(uid, txt)
+            return
+        elif state == STATE_EDIT_AGE:
+            handle_edit_age(uid, txt)
+            return
 
-    # معالجة حالات البحث
-    elif state == STATE_CHOOSE_TOPIC:
-        handle_topic_selection(uid, txt)
-        return
-    elif state == STATE_CHOOSE_TARGET_GENDER:
-        handle_target_gender(uid, txt)
-        return
+        # معالجة حالات البحث
+        elif state == STATE_CHOOSE_TOPIC:
+            handle_topic_selection(uid, txt)
+            return
+        elif state == STATE_CHOOSE_TARGET_GENDER:
+            handle_target_gender(uid, txt)
+            return
 
-    # معالجة حالات التأكيد
-    elif state == STATE_CONFIRM_LEAVE:
-        handle_leave_confirm(uid, u, txt)
-        return
-    elif state == STATE_CONFIRM_REPORT:
-        handle_report_text_confirm(uid, u, txt)
-        return
+        # معالجة حالات التأكيد
+        elif state == STATE_CONFIRM_LEAVE:
+            handle_leave_confirm(uid, u, txt)
+            return
+        elif state == STATE_CONFIRM_REPORT:
+            handle_report_text_confirm(uid, u, txt)
+            return
 
-    # زر "تواصل مع الدعم"
-    if txt == "تواصل مع الدعم":
-        support_handle = "@MAA2857"
-        safe_send(uid, f"للتواصل مع الدعم: {support_handle}\nأخبرنا بالمشكلة وسنراجعها.")
-        return
+        print(f"[BUTTON CHECK] Checking buttons for: '{txt}'")
 
-    # اعتراض أزرار المغادرة/إبلاغ
-    if txt == "🚪 مغادرة الدردشة":
-        handle_leave_request(uid)
-        return
-    if txt == "🚨 إبلاغ":
-        update_user(uid, {"state": STATE_CONFIRM_REPORT})
-        safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
-        return
+        # زر "تواصل مع الدعم"
+        if txt == "تواصل مع الدعم":
+            support_handle = "@MAA2857"
+            safe_send(uid, f"للتواصل مع الدعم: {support_handle}\nأخبرنا بالمشكلة وسنراجعها.")
+            return
 
-    # قائمة رئيسية
-    if txt == "👤 ملفي":
-        safe_send(uid, ProfileManager.profile_text(u), 
-                 reply_markup=main_menu(in_chat=bool(u.get("partner"))))
-        return
-    elif txt == "✏️ تعديل الاسم":
-        update_user(uid, {"state": STATE_EDIT_NAME})
-        safe_send(uid, "✏️ أرسل الاسم الجديد:", reply_markup=ReplyKeyboardRemove())
-        return
-    elif txt == "🎂 تعديل العمر":
-        update_user(uid, {"state": STATE_EDIT_AGE})
-        safe_send(uid, "🎂 أرسل العمر الجديد (10–120):", reply_markup=ReplyKeyboardRemove())
-        return
-    elif txt == "🆘 مساعدة":
-        support_handle = "@MAA2857"
-        safe_send(uid, f"تواصل مع الدعم: {support_handle}")
-        return
-    elif txt == "🔍 البحث عن دردشة":
-        handle_search_request(uid)
-        return
+        # اعتراض أزرار المغادرة/إبلاغ
+        if txt == "🚪 مغادرة الدردشة":
+            handle_leave_request(uid)
+            return
+        if txt == "🚨 إبلاغ":
+            update_user(uid, {"state": STATE_CONFIRM_REPORT})
+            safe_send(uid, REPORT_CONFIRM, reply_markup=yes_no_menu())
+            return
 
-    # إذا المستخدم داخل دردشة، مرّر للمعالجة الخاصة بالدردشة
-    if u.get("partner"):
-        handle_chat_message(uid, txt, u)
-        return
+        # قائمة رئيسية
+        if txt == "👤 ملفي":
+            safe_send(uid, ProfileManager.profile_text(u), 
+                     reply_markup=main_menu(in_chat=bool(u.get("partner"))))
+            return
+        elif txt == "✏️ تعديل الاسم":
+            update_user(uid, {"state": STATE_EDIT_NAME})
+            safe_send(uid, "✏️ أرسل الاسم الجديد:", reply_markup=ReplyKeyboardRemove())
+            return
+        elif txt == "🎂 تعديل العمر":
+            update_user(uid, {"state": STATE_EDIT_AGE})
+            safe_send(uid, "🎂 أرسل العمر الجديد (10–120):", reply_markup=ReplyKeyboardRemove())
+            return
+        elif txt == "🆘 مساعدة":
+            support_handle = "@MAA2857"
+            safe_send(uid, f"تواصل مع الدعم: {support_handle}")
+            return
+        elif txt == "🔍 البحث عن دردشة":
+            handle_search_request(uid)
+            return
 
-    # افتراضي
-    safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", 
-             reply_markup=main_menu(in_chat=False))
+        # إذا المستخدم داخل دردشة، مرّر للمعالجة الخاصة بالدردشة
+        if u.get("partner"):
+            print(f"[CHAT MESSAGE] Processing chat message for uid={uid}")
+            handle_chat_message(uid, txt, u)
+            return
+
+        # افتراضي
+        print(f"[DEFAULT] No match found for uid={uid}, text='{txt}'")
+        safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", 
+                 reply_markup=main_menu(in_chat=False))
+                 
+    except Exception as e:
+        print(f"[on_text CRITICAL ERROR] {e}")
+        print(traceback.format_exc())
+        try:
+            safe_send(uid, "❌ حدث خطأ. حاول مرة أخرى أو أعد تشغيل البوت بـ /start")
+        except:
+            pass
 
 # ---------- دوال التسجيل (مبسطة بدون next_step_handler) ----------
 
 # استبدل دوال التسجيل الحالية بهذه النسخة المحسنة
 
-# استبدل دالة handle_register_name بهذه النسخة المحسنة
-
 def handle_register_name(uid: int, txt: str):
-    print(f"[REGISTER_NAME START] uid={uid}, text='{txt}'")
+    print(f"[REGISTER_NAME] START - uid={uid}, text='{txt}'")
     
+    # التحقق من صحة الاسم
     if len(txt) < 2 or len(txt) > 30:
+        print(f"[REGISTER_NAME] Invalid name length: {len(txt)}")
         safe_send(uid, "❌ الاسم غير صالح، استخدم 2–30 حرفًا. حاول مرة أخرى:")
         return
 
     try:
-        # حفظ الاسم
-        ProfileManager.set_name(uid, txt)
+        # محاولة حفظ الاسم
+        print(f"[REGISTER_NAME] Attempting to save name: '{txt}'")
+        
+        # التأكد من وجود ProfileManager
+        if not hasattr(ProfileManager, 'set_name'):
+            print(f"[REGISTER_NAME] ERROR: ProfileManager.set_name not found!")
+            # fallback - حفظ مباشر
+            update_user(uid, {"name": txt})
+        else:
+            ProfileManager.set_name(uid, txt)
+        
         print(f"[REGISTER_NAME] Name saved successfully")
         
-        # الانتقال لحالة اختيار الجنس
+        # الانتقال للمرحلة التالية
         update_user(uid, {"state": STATE_REGISTER_GENDER})
-        print(f"[REGISTER_NAME] State updated to REGISTER_GENDER")
+        print(f"[REGISTER_NAME] State updated to: {STATE_REGISTER_GENDER}")
         
-        # إرسال ستيكر بعد الاسم
+        # إرسال ستيكر ترحيبي (إذا فشل، لا نتوقف)
         try:
-            safe_send_sticker(uid, STICKERS.get("after_name"))
+            sticker_id = STICKERS.get("after_name")
+            if sticker_id:
+                safe_send_sticker(uid, sticker_id)
+                print(f"[REGISTER_NAME] Sticker sent")
+            else:
+                print(f"[REGISTER_NAME] No after_name sticker found")
         except Exception as e:
-            print(f"[REGISTER_NAME] Sticker send error: {e}")
+            print(f"[REGISTER_NAME] Sticker send error (ignored): {e}")
         
         # طلب اختيار الجنس
-        safe_send(uid, f"✅ أهلاً {txt}! 👋\n\n💡 الآن اختر جنسك:", reply_markup=gender_menu())
+        safe_send(uid, f"✅ أهلاً {txt}! 👋\n\n💡 الآن اختر جنسك:", 
+                 reply_markup=gender_menu())
         
         print(f"[REGISTER_NAME] Successfully completed for uid={uid}")
         
     except Exception as e:
-        print(f"[handle_register_name ERROR] {e}")
+        print(f"[handle_register_name] CRITICAL ERROR: {e}")
         print(traceback.format_exc())
-        safe_send(uid, "❌ حدث خطأ أثناء حفظ الاسم. حاول مرة أخرى:")
+        safe_send(uid, "❌ حدث خطأ أثناء حفظ الاسم. حاول مرة أخرى أو أعد تشغيل البوت بـ /start")
 
 def handle_register_gender(uid: int, txt: str):
     print(f"[REGISTER_GENDER START] uid={uid}, text='{txt}'")
