@@ -245,12 +245,15 @@ def cmd_report(m: Message):
 # الالتقاط العام للنص - هنا المشكلة والحل
 # استبدال معالج الرسائل الحالي بهذا المعالج المحسن
 
+# استبدل دالة on_text الموجودة بهذه الدالة المُصححة
+
 @bot.message_handler(func=lambda msg: True, content_types=["text"])
 def on_text(m: Message):
     uid = m.from_user.id
     txt = (m.text or "").strip()
     
-    # تأكد من وجود المستخدم
+    print(f"[MESSAGE RECEIVED] uid={uid}, text='{txt}'")  # debug مهم
+    
     ensure_user_extended(uid)
     u = users[uid]
     
@@ -259,19 +262,19 @@ def on_text(m: Message):
         return
         
     state = u.get("state") or ""
-    print(f"[MSG DEBUG] from={uid} state='{state}' text='{txt[:50]}...'")
+    print(f"[MSG] from={uid} state='{state}' text={txt[:50]}...")
 
-    # **معالجة حالات التسجيل أولاً - هذا هو الحل الرئيسي**
+    # معالجة حالات التسجيل أولاً
     if state == STATE_REGISTER_NAME:
-        print(f"[DEBUG] Processing register name for uid={uid}")
+        print(f"[DEBUG] Processing REGISTER_NAME for uid={uid}")
         handle_register_name(uid, txt)
         return
     elif state == STATE_REGISTER_GENDER:
-        print(f"[DEBUG] Processing register gender for uid={uid}")
+        print(f"[DEBUG] Processing REGISTER_GENDER for uid={uid}")
         handle_register_gender(uid, txt)
         return
     elif state == STATE_REGISTER_AGE:
-        print(f"[DEBUG] Processing register age for uid={uid}")
+        print(f"[DEBUG] Processing REGISTER_AGE for uid={uid}")
         handle_register_age(uid, txt)
         return
 
@@ -299,12 +302,13 @@ def on_text(m: Message):
         handle_report_text_confirm(uid, u, txt)
         return
 
-    # معالجة الأزرار العادية (بعد معالجة الحالات)
+    # زر "تواصل مع الدعم"
     if txt == "تواصل مع الدعم":
         support_handle = "@MAA2857"
         safe_send(uid, f"للتواصل مع الدعم: {support_handle}\nأخبرنا بالمشكلة وسنراجعها.")
         return
 
+    # اعتراض أزرار المغادرة/إبلاغ
     if txt == "🚪 مغادرة الدردشة":
         handle_leave_request(uid)
         return
@@ -334,12 +338,12 @@ def on_text(m: Message):
         handle_search_request(uid)
         return
 
-    # إذا المستخدم داخل دردشة
+    # إذا المستخدم داخل دردشة، مرّر للمعالجة الخاصة بالدردشة
     if u.get("partner"):
         handle_chat_message(uid, txt, u)
         return
 
-    # افتراضي - إذا لم يكن هناك state ولا partner
+    # افتراضي
     safe_send(uid, "❔ لم أفهم. استخدم الأزرار بالأسفل.", 
              reply_markup=main_menu(in_chat=False))
 
@@ -347,36 +351,34 @@ def on_text(m: Message):
 
 # استبدل دوال التسجيل الحالية بهذه النسخة المحسنة
 
+# استبدل دالة handle_register_name بهذه النسخة المحسنة
+
 def handle_register_name(uid: int, txt: str):
     print(f"[REGISTER_NAME START] uid={uid}, text='{txt}'")
     
-    # التحقق من صحة الاسم
     if len(txt) < 2 or len(txt) > 30:
         safe_send(uid, "❌ الاسم غير صالح، استخدم 2–30 حرفًا. حاول مرة أخرى:")
         return
 
     try:
-        # تأكد من وجود المستخدم
-        ensure_user_extended(uid)
-        
         # حفظ الاسم
-        success = ProfileManager.set_name(uid, txt)
-        print(f"[REGISTER_NAME] ProfileManager.set_name result: {success}")
+        ProfileManager.set_name(uid, txt)
+        print(f"[REGISTER_NAME] Name saved successfully")
         
-        # تحديث الحالة للخطوة التالية
+        # الانتقال لحالة اختيار الجنس
         update_user(uid, {"state": STATE_REGISTER_GENDER})
-        print(f"[REGISTER_NAME] Updated state to: {STATE_REGISTER_GENDER}")
+        print(f"[REGISTER_NAME] State updated to REGISTER_GENDER")
         
-        # إرسال ستيكر ترحيبي
+        # إرسال ستيكر بعد الاسم
         try:
             safe_send_sticker(uid, STICKERS.get("after_name"))
         except Exception as e:
-            print(f"[REGISTER_NAME] Sticker error: {e}")
+            print(f"[REGISTER_NAME] Sticker send error: {e}")
         
         # طلب اختيار الجنس
-        safe_send(uid, f"✅ تم حفظ الاسم: {txt}\n💡 الآن اختر جنسك:", reply_markup=gender_menu())
+        safe_send(uid, f"✅ أهلاً {txt}! 👋\n\n💡 الآن اختر جنسك:", reply_markup=gender_menu())
         
-        print(f"[REGISTER_NAME SUCCESS] uid={uid}")
+        print(f"[REGISTER_NAME] Successfully completed for uid={uid}")
         
     except Exception as e:
         print(f"[handle_register_name ERROR] {e}")
