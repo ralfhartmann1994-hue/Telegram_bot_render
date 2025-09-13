@@ -165,28 +165,51 @@ def partner_profile_text(pid: int):
         return "معلومات الشريك غير متوفرة."
 
 # معالجات الأوامر
+# استبدل معالج أمر /start بهذا المعالج المحسن
+
 @bot.message_handler(commands=['start'])
 def cmd_start(message: Message):
     uid = message.from_user.id
     u = ensure_user_extended(uid)
+    
+    print(f"[START COMMAND] uid={uid}, current user data: {u}")
 
     # إذا كان المستخدم جديدًا أو لم يُسجل اسمه
     if not u.get("name"):
+        print(f"[START] New user registration for uid={uid}")
+        
         # إرسال رسالة ترحيبية عشوائية أولاً
         welcome_msg = get_welcome_message("START")
         safe_send(uid, welcome_msg)
         
         # ثم إرسال الستيكر الترحيبي
-        safe_send_sticker(uid, STICKERS.get("welcome_general"))
+        try:
+            safe_send_sticker(uid, STICKERS.get("welcome_general"))
+        except Exception as e:
+            print(f"[START] Sticker error: {e}")
 
-        # بدء خطوة التسجيل بالاسم
+        # بدء خطوة التسجيل بالاسم - هذا مهم جداً
         update_user(uid, {"state": STATE_REGISTER_NAME})
-        safe_send(uid, "💡 لنبدأ بإنشاء ملفك الشخصي.\nما هو اسمك؟")
+        print(f"[START] Set state to: {STATE_REGISTER_NAME}")
+        
+        # التأكد من حفظ التغييرات
+        try:
+            save_users()
+            print(f"[START] Users saved successfully")
+        except Exception as e:
+            print(f"[START] Save users error: {e}")
+        
+        # إرسال رسالة طلب الاسم
+        safe_send(uid, "💡 لنبدأ بإنشاء ملفك الشخصي.\n\n👤 ما هو اسمك؟ (2-30 حرف)", 
+                 reply_markup=ReplyKeyboardRemove())
+        
+        print(f"[START] Registration process started for uid={uid}")
+        
     else:
         # المستخدم قديم، نرحب به مع قائمة رئيسية
-        safe_send(uid, f"👋 مرحبًا مجددًا، {u.get('name')}!", 
+        print(f"[START] Existing user: {u.get('name')}")
+        safe_send(uid, f"👋 مرحبًا مجددًا، {u.get('name')}!\n\nماذا تريد أن تفعل اليوم؟", 
                  reply_markup=main_menu(in_chat=bool(u.get("partner"))))
-
 @bot.message_handler(commands=["profile"])
 def cmd_profile(m: Message):
     uid = m.from_user.id
@@ -322,59 +345,78 @@ def on_text(m: Message):
 
 # ---------- دوال التسجيل (مبسطة بدون next_step_handler) ----------
 
+# استبدل دوال التسجيل الحالية بهذه النسخة المحسنة
+
 def handle_register_name(uid: int, txt: str):
-    print(f"[REGISTER_NAME] uid={uid}, text={txt}")
+    print(f"[REGISTER_NAME START] uid={uid}, text='{txt}'")
     
+    # التحقق من صحة الاسم
     if len(txt) < 2 or len(txt) > 30:
         safe_send(uid, "❌ الاسم غير صالح، استخدم 2–30 حرفًا. حاول مرة أخرى:")
         return
 
     try:
+        # تأكد من وجود المستخدم
+        ensure_user_extended(uid)
+        
         # حفظ الاسم
-        ProfileManager.set_name(uid, txt)
+        success = ProfileManager.set_name(uid, txt)
+        print(f"[REGISTER_NAME] ProfileManager.set_name result: {success}")
         
-        # الانتقال لحالة اختيار الجنس
+        # تحديث الحالة للخطوة التالية
         update_user(uid, {"state": STATE_REGISTER_GENDER})
+        print(f"[REGISTER_NAME] Updated state to: {STATE_REGISTER_GENDER}")
         
-        # إرسال ستيكر بعد الاسم
-        safe_send_sticker(uid, STICKERS.get("after_name"))
+        # إرسال ستيكر ترحيبي
+        try:
+            safe_send_sticker(uid, STICKERS.get("after_name"))
+        except Exception as e:
+            print(f"[REGISTER_NAME] Sticker error: {e}")
         
         # طلب اختيار الجنس
-        safe_send(uid, "💡 اختر جنسك:", reply_markup=gender_menu())
+        safe_send(uid, f"✅ تم حفظ الاسم: {txt}\n💡 الآن اختر جنسك:", reply_markup=gender_menu())
         
-        print(f"[REGISTER_NAME] Success for uid={uid}")
+        print(f"[REGISTER_NAME SUCCESS] uid={uid}")
         
     except Exception as e:
         print(f"[handle_register_name ERROR] {e}")
+        print(traceback.format_exc())
         safe_send(uid, "❌ حدث خطأ أثناء حفظ الاسم. حاول مرة أخرى:")
 
 def handle_register_gender(uid: int, txt: str):
-    print(f"[REGISTER_GENDER] uid={uid}, text={txt}")
+    print(f"[REGISTER_GENDER START] uid={uid}, text='{txt}'")
     
     valid_genders = getattr(config, "GENDERS", ["ذكر", "أنثى"])
     if txt not in valid_genders:
-        safe_send(uid, f"❌ اختر جنسًا صالحًا: {' / '.join(valid_genders)}", 
+        safe_send(uid, f"❌ اختر جنسًا صالحًا من: {' / '.join(valid_genders)}", 
                  reply_markup=gender_menu())
         return
 
     try:
+        # تأكد من وجود المستخدم
+        ensure_user_extended(uid)
+        
         # حفظ الجنس
-        ProfileManager.set_gender(uid, txt)
+        success = ProfileManager.set_gender(uid, txt)
+        print(f"[REGISTER_GENDER] ProfileManager.set_gender result: {success}")
         
         # الانتقال لحالة إدخال العمر
         update_user(uid, {"state": STATE_REGISTER_AGE})
+        print(f"[REGISTER_GENDER] Updated state to: {STATE_REGISTER_AGE}")
         
         # إرسال رسالة طلب العمر
-        safe_send(uid, "🎂 ما عمرك؟ (10–120)", reply_markup=ReplyKeyboardRemove())
+        safe_send(uid, f"✅ تم حفظ الجنس: {txt}\n🎂 ما عمرك؟ (10–120)", 
+                 reply_markup=ReplyKeyboardRemove())
         
-        print(f"[REGISTER_GENDER] Success for uid={uid}")
+        print(f"[REGISTER_GENDER SUCCESS] uid={uid}")
         
     except Exception as e:
         print(f"[handle_register_gender ERROR] {e}")
+        print(traceback.format_exc())
         safe_send(uid, "❌ حدث خطأ أثناء حفظ الجنس. حاول مرة أخرى:")
 
 def handle_register_age(uid: int, txt: str):
-    print(f"[REGISTER_AGE] uid={uid}, text={txt}")
+    print(f"[REGISTER_AGE START] uid={uid}, text='{txt}'")
     
     # التحقق من أن الإدخال رقم
     try:
@@ -389,26 +431,41 @@ def handle_register_age(uid: int, txt: str):
         return
 
     try:
+        # تأكد من وجود المستخدم
+        ensure_user_extended(uid)
+        
         # حفظ العمر
-        ProfileManager.set_age(uid, age)
+        success = ProfileManager.set_age(uid, age)
+        print(f"[REGISTER_AGE] ProfileManager.set_age result: {success}")
         
         # إنهاء حالة التسجيل
         update_user(uid, {"state": None})
+        print(f"[REGISTER_AGE] Cleared state")
         
         # استدعاء المستخدم المحديث
         u = storage.users.get(uid, {})
+        print(f"[REGISTER_AGE] User data: {u}")
         
         # إرسال رسالة تأكيد حفظ الملف الشخصي
-        safe_send(uid, PROFILE_SAVED.format(
+        profile_msg = PROFILE_SAVED.format(
             name=u.get("name", "غير محدد"),
             gender=u.get("gender", "غير محدد"),
             age=u.get("age", "غير محدد")
-        ), reply_markup=main_menu(in_chat=False))
+        )
         
-        print(f"[REGISTER_AGE] Success for uid={uid}")
+        safe_send(uid, profile_msg, reply_markup=main_menu(in_chat=False))
+        
+        # إرسال ستيكر احتفالي
+        try:
+            safe_send_sticker(uid, STICKERS.get("registration_complete", STICKERS.get("welcome_general")))
+        except Exception as e:
+            print(f"[REGISTER_AGE] Sticker error: {e}")
+        
+        print(f"[REGISTER_AGE SUCCESS] uid={uid}")
         
     except Exception as e:
         print(f"[handle_register_age ERROR] {e}")
+        print(traceback.format_exc())
         safe_send(uid, "❌ حدث خطأ أثناء حفظ العمر. حاول مرة أخرى:")
 
 # ---------- باقي الدوال تبقى كما هي ----------
