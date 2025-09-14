@@ -1,4 +1,4 @@
-# Main.py (مصحح ومحسن مع الإصلاحات الجديدة)
+# Main.py (مصحح نهائياً مع إصلاح جميع المشاكل)
 import os
 import time
 import traceback
@@ -10,9 +10,9 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 # استيراد إعدادات ورسائل وستيكرات
 config = importlib.import_module("config")
 from messages import (
-    delayed_send, get_welcome_message, WELCOME, HELP, SEARCHING, NO_MATCH, 
+    delayed_send, get_welcome_message, get_category_welcome, WELCOME, HELP, SEARCHING, NO_MATCH, 
     INTRO_PARTNER, LEAVE_CONFIRM, LEAVE_TOO_SOON, LEFT_YOU, LEFT_PARTNER, 
-    REPORT_CONFIRM, REPORT_OK, REPORT_RESULT, MUTED, BANNED, PROFILE_SAVED
+    REPORT_CONFIRM, REPORT_OK, REPORT_RESULT, MUTED, BANNED, PROFILE_SAVED, SEARCH_CANCELLED
 )
 from stickers import STICKERS
 
@@ -77,13 +77,21 @@ def main_menu(in_chat: bool = False) -> ReplyKeyboardMarkup:
 
 def topics_menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    # الفئات الخمس بدون إيموجي وبدون "عام"
-    TOPICS = ["رياضة", "سياسة", "دين", "فلسفة", "تعارف"]
+    # الفئات بدون إيموجي
+    TOPICS = [
+        "رياضة",
+        "سياسة", 
+        "دين",
+        "فلسفة",
+        "تعارف"
+    ]
     for i in range(0, len(TOPICS), 2):
         row = [KeyboardButton(TOPICS[i])]
         if i+1 < len(TOPICS):
             row.append(KeyboardButton(TOPICS[i+1]))
         kb.add(*row)
+    # زر إلغاء البحث
+    kb.add(KeyboardButton("❌ إلغاء البحث"))
     return kb
 
 def gender_menu():
@@ -96,6 +104,13 @@ def target_gender_menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     for tg in getattr(config, "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"]):
         kb.add(KeyboardButton(tg))
+    # زر العودة للفئات
+    kb.add(KeyboardButton("🔙 العودة لاختيار الفئة"))
+    return kb
+
+def searching_menu():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    kb.add(KeyboardButton("❌ إلغاء البحث"))
     return kb
 
 def yes_no_menu():
@@ -112,9 +127,10 @@ except Exception as e:
 # امتدادات لضمان الحقول الأساسية (80 نقطة احترام افتراضية)
 def ensure_user_extended(uid: int):
     u = ensure_user(uid)
-    if "points" not in u:
+    # تعيين النقاط والاحترام إلى 80 (مُصحح)
+    if "points" not in u or u["points"] == 100:
         u["points"] = 80
-    if "respect" not in u:
+    if "respect" not in u or u["respect"] == 100:
         u["respect"] = 80
     if "referrer" not in u:
         u["referrer"] = None
@@ -258,6 +274,34 @@ def on_text(m: Message):
         state = u.get("state") or ""
         print(f"[STATE CHECK] uid={uid}, state='{state}'")
 
+        # معالجة أزرار التنقل والإلغاء
+        if txt == "❌ إلغاء البحث":
+            if state in [STATE_CHOOSE_TOPIC, STATE_CHOOSE_TARGET_GENDER, STATE_SEARCHING]:
+                # إزالة من قائمة الانتظار إذا كان في البحث
+                try:
+                    remove_from_wait(uid)
+                except Exception as e:
+                    print(f"[CANCEL SEARCH] remove_from_wait error: {e}")
+                
+                storage.users[uid]["state"] = None
+                storage.users[uid]["topic"] = None
+                storage.users[uid]["target_gender"] = None
+                storage.save_users()
+                
+                safe_send(uid, SEARCH_CANCELLED, reply_markup=main_menu(in_chat=False))
+                return
+            else:
+                safe_send(uid, "لا يوجد بحث نشط ليتم إلغاؤه.", reply_markup=main_menu(in_chat=False))
+                return
+
+        if txt == "🔙 العودة لاختيار الفئة":
+            if state == STATE_CHOOSE_TARGET_GENDER:
+                storage.users[uid]["state"] = STATE_CHOOSE_TOPIC
+                storage.users[uid]["target_gender"] = None
+                storage.save_users()
+                safe_send(uid, "اختر موضوع النقاش:", reply_markup=topics_menu())
+                return
+
         # معالجة حالات التسجيل أولاً
         if state == STATE_REGISTER_NAME:
             handle_register_name(uid, txt)
@@ -353,9 +397,13 @@ def handle_register_name(uid: int, txt: str):
         storage.users[uid]["state"] = STATE_REGISTER_GENDER
         storage.save_users()
         
-        # إرسال النص أولاً ثم الستيكر
+        # إرسال الستيكر أولاً ثم النص (مُصحح)
+        try:
+            safe_send_sticker(uid, STICKERS.get("after_name"))
+        except Exception as e:
+            print(f"[REGISTER_NAME] Sticker error: {e}")
+        
         safe_send(uid, f"✅ أهلاً {txt}! 👋\n\n💡 الآن اختر جنسك:", reply_markup=gender_menu())
-        safe_send_sticker(uid, STICKERS.get("after_name"))
         
     except Exception as e:
         print(f"[handle_register_name ERROR] {e}")
@@ -401,13 +449,23 @@ def handle_register_age(uid: int, txt: str):
         storage.save_users()
         
         u = storage.users.get(uid, {})
+        
+        # رسالة وستيكر خاص للصغار (أقل من 20) - مُصحح
+        if age < 20:
+            safe_send(uid, f"✅ تم حفظ العمر: {age}\n🐤 أهلاً بالكتكوت الصغير!")
+            try:
+                safe_send_sticker(uid, STICKERS.get("nabeel_young"))
+                print(f"[REGISTER_AGE] Nabeel sticker sent for age {age}")
+            except Exception as e:
+                print(f"[REGISTER_AGE] Nabeel sticker error: {e}")
+        
+        # رسالة حفظ الملف الشخصي
         profile_msg = PROFILE_SAVED.format(
             name=u.get("name", "غير محدد"),
             gender=u.get("gender", "غير محدد"),
             age=u.get("age", "غير محدد")
         )
         
-        # إرسال النص أولاً ثم القائمة (بدون ستيكر)
         safe_send(uid, profile_msg, reply_markup=main_menu(in_chat=False))
             
     except Exception as e:
@@ -462,26 +520,38 @@ def handle_search_request(uid: int):
     safe_send(uid, "اختر موضوع النقاش:", reply_markup=topics_menu())
 
 def handle_topic_selection(uid: int, txt: str):
-    # الفئات الخمس المحددة
-    TOPICS = ["رياضة", "سياسة", "دين", "فلسفة", "تعارف"]
+    # الفئات مع الإيموجي (مُصحح)
+    TOPICS_WITH_EMOJI = [
+        "رياضة ⚽",
+        "سياسة 🗳️", 
+        "دين ☪️",
+        "فلسفة 🤔",
+        "تعارف 💬"
+    ]
     
-    if txt not in TOPICS:
+    if txt not in TOPICS_WITH_EMOJI:
         safe_send(uid, "❌ اختر موضوعًا صالحًا من القائمة.", reply_markup=topics_menu())
         return
-        
-    storage.users[uid]["topic"] = txt
+    
+    # استخراج اسم الفئة بدون إيموجي للمعالجة الداخلية
+    topic_name = txt.split()[0]  # "رياضة", "سياسة", إلخ
+    
+    storage.users[uid]["topic"] = topic_name
     storage.users[uid]["state"] = STATE_CHOOSE_TARGET_GENDER
     storage.save_users()
     
-    # رسالة خاصة لموضوع "رياضة" مع ستيكر برشلونة
-    if txt == "رياضة":
-        safe_send(uid, f"🏆 ممتاز! اخترت الرياضة\n⚽ بس أتمنى ما تكون من جماعة الميرينجي 😂\n\nالآن اختر جنس الطرف الذي تريده:", 
-                 reply_markup=target_gender_menu())
-        # إرسال ستيكر برشلونة بعد النص
+    # رسالة ترحيب خاصة بكل فئة
+    welcome_msg = get_category_welcome(topic_name)
+    safe_send(uid, welcome_msg)
+    
+    # ستيكرات خاصة بكل فئة (بعد الرسالة)
+    if topic_name == "رياضة":
         safe_send_sticker(uid, STICKERS.get("barca_celebration"))
-    else:
-        safe_send(uid, f"تم اختيار الموضوع: {txt}\nالآن اختر جنس الطرف الذي تريده:", 
-                 reply_markup=target_gender_menu())
+    elif topic_name == "سياسة":
+        safe_send_sticker(uid, STICKERS.get("putin_politics"))
+    
+    # طلب اختيار الجنس المستهدف
+    safe_send(uid, f"الآن اختر جنس الطرف الذي تريده:", reply_markup=target_gender_menu())
 
 def handle_target_gender(uid: int, txt: str):
     valid = getattr(config, "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"])
@@ -508,7 +578,7 @@ def handle_target_gender(uid: int, txt: str):
     except Exception as e:
         print(f"[add_to_wait ERROR] {e}")
 
-    safe_send(uid, SEARCHING, reply_markup=ReplyKeyboardRemove())
+    safe_send(uid, SEARCHING, reply_markup=searching_menu())
 
     partner = None
     try:
@@ -523,54 +593,6 @@ def handle_target_gender(uid: int, txt: str):
             storage.users[uid]["state"] = None
             storage.users[uid]["chat_started_at"] = time.time()
             
-            storage.users[pid]["partner"] = uid
-            storage.users[pid]["state"] = None
-            storage.users[pid]["chat_started_at"] = time.time()
-            storage.save_users()
-            
-            ProfileManager.start_history(storage.users[uid])
-            ProfileManager.start_history(storage.users[pid])
-            
-            safe_send(uid, partner_profile_text(pid), reply_markup=ReplyKeyboardRemove())
-            safe_send(pid, partner_profile_text(uid), reply_markup=ReplyKeyboardRemove())
-            safe_send(uid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
-            safe_send(pid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
-        except Exception as e:
-            print(f"[MATCH SETUP ERROR] {e}")
-
-    try:
-        start_timeout_watcher(bot)
-    except Exception as e:
-        print(f"[start_timeout_watcher ERROR] {e}")
-
-def handle_leave_request(uid: int):
-    ensure_user_extended(uid)
-    u = storage.users.get(uid, {})
-    started = u.get("chat_started_at") or 0
-    elapsed = time.time() - started
-    leave_delay = getattr(config, "LEAVE_DELAY", 30)
-    if elapsed < leave_delay:
-        safe_send(uid, LEAVE_TOO_SOON.format(remain=int(leave_delay - elapsed)))
-        return
-    storage.users[uid]["state"] = STATE_CONFIRM_LEAVE
-    storage.save_users()
-    safe_send(uid, LEAVE_CONFIRM, reply_markup=yes_no_menu())
-
-def handle_leave_confirm(uid: int, u: dict, txt: str):
-    if txt == "نعم ✅":
-        pid = u.get("partner")
-        if pid:
-            try:
-                ProfileManager.end_session(storage.users[uid], storage.users[pid])
-            except Exception:
-                pass
-                
-            storage.users[uid]["partner"] = None
-            storage.users[uid]["state"] = None
-            storage.users[uid]["chat_started_at"] = None
-            
-            storage.users[pid]["partner"] = None
-            storage.users[pid]["state"] = None
             storage.users[pid]["chat_started_at"] = None
             storage.save_users()
             
@@ -596,15 +618,35 @@ def handle_report_confirm(uid: int, u: dict, txt: str):
     if txt == "نعم ✅":
         pid = u.get("partner")
         try:
+            # فحص الكلمات المسيئة في تاريخ المحادثة - مُصحح
             hist = []
+            total_bad_words = 0
+            
             if pid and storage.users.get(pid):
                 hist = storage.users[pid].get("history", [])
+                print(f"[REPORT] Checking {len(hist)} messages for bad words")
+                
+                # عدّ الكلمات المسيئة في كل رسالة
+                for message in hist:
+                    try:
+                        bad_words = contains_bad_word(message)
+                        if bad_words and len(bad_words) > 0:
+                            total_bad_words += len(bad_words)
+                            print(f"[REPORT] Found {len(bad_words)} bad words in message: {message[:50]}")
+                    except Exception as e:
+                        print(f"[REPORT] Error checking message: {e}")
             
-            # تطبيق خصم النقاط (5 نقاط لكل بلاغ)
-            if pid and storage.users.get(pid):
+            print(f"[REPORT] Total bad words found: {total_bad_words}")
+            
+            # خصم 5 نقاط لكل كلمة مسيئة - مُصحح
+            penalty = total_bad_words * 5
+            
+            if pid and storage.users.get(pid) and penalty > 0:
                 current_respect = storage.users[pid].get("respect", 80)
-                new_respect = max(0, current_respect - 5)  # خصم 5 نقاط
+                new_respect = max(0, current_respect - penalty)
                 storage.users[pid]["respect"] = new_respect
+                
+                print(f"[REPORT] Penalty: {penalty}, Old respect: {current_respect}, New respect: {new_respect}")
                 
                 # تحقق إذا كان يحتاج حظر أو كتم
                 if new_respect <= 25:
@@ -616,7 +658,7 @@ def handle_report_confirm(uid: int, u: dict, txt: str):
                 
                 # إخبار المبلغ
                 safe_send(uid, REPORT_OK)
-                safe_send(uid, f"✅ تم خصم 5 نقاط احترام من الشريك\n⭐ احترامه الآن: {new_respect}")
+                safe_send(uid, f"✅ تم العثور على {total_bad_words} كلمة مسيئة\n⬇️ تم خصم {penalty} نقطة احترام من الشريك ({total_bad_words} × 5)\n⭐ احترامه الآن: {new_respect}")
                 
                 # تنبيه المسيء
                 if new_respect <= 25:
@@ -624,13 +666,18 @@ def handle_report_confirm(uid: int, u: dict, txt: str):
                 elif new_respect <= 40:
                     safe_send(pid, "⏰ تم كتمك مؤقتاً بسبب البلاغات ضدك!")
                 else:
-                    safe_send(pid, f"⚠️ تم تلقي بلاغ ضدك وخصم 5 نقاط احترام\n⭐ احترامك الآن: {new_respect}\n🔔 انتبه! إذا استمريت بالكلام البذيء ستحظر!")
+                    safe_send(pid, f"⚠️ تم تلقي بلاغ ضدك وخصم {penalty} نقطة احترام\n⭐ احترامك الآن: {new_respect}\n🔔 انتبه! إذا استمريت بالكلام البذيء ستحظر!")
                 
             else:
                 safe_send(uid, REPORT_OK)
+                if pid and storage.users.get(pid):
+                    safe_send(uid, f"ℹ️ لم يتم العثور على كلمات مسيئة في محادثة الشريك\n⭐ احترام الشريك: {storage.users[pid].get('respect', 80)}")
+                else:
+                    safe_send(uid, "ℹ️ لم يتم العثور على مخالفات")
                 
         except Exception as e:
             print(f"[REPORT ERROR] {e}")
+            print(traceback.format_exc())
             safe_send(uid, REPORT_OK)
             
         # العودة للقائمة الرئيسية مع إمكانية المغادرة
@@ -674,9 +721,9 @@ def handle_chat_message(uid: int, txt: str, u: dict):
     except Exception:
         pass
 
-    # حفظ الرسالة في التاريخ للبلاغات المستقبلية
+    # حفظ الرسالة الأصلية في التاريخ للبلاغات المستقبلية
     try:
-        append_history(uid, txt_to_send)
+        append_history(uid, txt)  # حفظ النص الأصلي للبلاغات
     except Exception:
         pass
 
@@ -736,4 +783,52 @@ if __name__ == "__main__":
         print(f"[WEBHOOK ERROR] {e}")
     port = int(os.environ.get("PORT", getattr(config, "PORT", 5000)))
     print(f"[RUN] Webhook listening on port {port}…")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port)d]["partner"] = uid
+            storage.users[pid]["state"] = None
+            storage.users[pid]["chat_started_at"] = time.time()
+            storage.save_users()
+            
+            ProfileManager.start_history(storage.users[uid])
+            ProfileManager.start_history(storage.users[pid])
+            
+            safe_send(uid, partner_profile_text(pid), reply_markup=ReplyKeyboardRemove())
+            safe_send(pid, partner_profile_text(uid), reply_markup=ReplyKeyboardRemove())
+            safe_send(uid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
+            safe_send(pid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
+        except Exception as e:
+            print(f"[MATCH SETUP ERROR] {e}")
+
+    try:
+        start_timeout_watcher(bot)
+    except Exception as e:
+        print(f"[start_timeout_watcher ERROR] {e}")
+
+def handle_leave_request(uid: int):
+    ensure_user_extended(uid)
+    u = storage.users.get(uid, {})
+    started = u.get("chat_started_at") or 0
+    elapsed = time.time() - started
+    leave_delay = getattr(config, "LEAVE_DELAY", 30)
+    if elapsed < leave_delay:
+        safe_send(uid, LEAVE_TOO_SOON.format(remain=int(leave_delay - elapsed)))
+        return
+    storage.users[uid]["state"] = STATE_CONFIRM_LEAVE
+    storage.save_users()
+    safe_send(uid, LEAVE_CONFIRM, reply_markup=yes_no_menu())
+
+def handle_leave_confirm(uid: int, u: dict, txt: str):
+    if txt == "نعم ✅":
+        pid = u.get("partner")
+        if pid:
+            try:
+                ProfileManager.end_session(storage.users[uid], storage.users[pid])
+            except Exception:
+                pass
+                
+            storage.users[uid]["partner"] = None
+            storage.users[uid]["state"] = None
+            storage.users[uid]["chat_started_at"] = None
+            
+            storage.users[pid]["partner"] = None
+            storage.users[pid]["state"] = None
+            storage.users[pi
