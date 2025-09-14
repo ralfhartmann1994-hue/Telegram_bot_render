@@ -1,4 +1,4 @@
-# Main.py (مصحح نهائياً مع إصلاح جميع المشاكل)
+# Main.py (الجزء الأول - الاستيراد والإعدادات)
 import os
 import time
 import traceback
@@ -77,20 +77,19 @@ def main_menu(in_chat: bool = False) -> ReplyKeyboardMarkup:
 
 def topics_menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    # الفئات بدون إيموجي
+    # الفئات مع الإيموجي
     TOPICS = [
-        "رياضة",
-        "سياسة", 
-        "دين",
-        "فلسفة",
-        "تعارف"
+        "رياضة ⚽",
+        "سياسة 🗳️", 
+        "دين ☪️",
+        "فلسفة 🤔",
+        "تعارف 💬"
     ]
     for i in range(0, len(TOPICS), 2):
         row = [KeyboardButton(TOPICS[i])]
         if i+1 < len(TOPICS):
             row.append(KeyboardButton(TOPICS[i+1]))
         kb.add(*row)
-    # زر إلغاء البحث
     kb.add(KeyboardButton("❌ إلغاء البحث"))
     return kb
 
@@ -104,7 +103,6 @@ def target_gender_menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     for tg in getattr(config, "TARGET_GENDERS", ["👨 رجل", "👩 امرأة"]):
         kb.add(KeyboardButton(tg))
-    # زر العودة للفئات
     kb.add(KeyboardButton("🔙 العودة لاختيار الفئة"))
     return kb
 
@@ -127,10 +125,9 @@ except Exception as e:
 # امتدادات لضمان الحقول الأساسية (80 نقطة احترام افتراضية)
 def ensure_user_extended(uid: int):
     u = ensure_user(uid)
-    # تعيين النقاط والاحترام إلى 80 (مُصحح)
-    if "points" not in u or u["points"] == 100:
+    if "points" not in u or u.get("points") == 100:
         u["points"] = 80
-    if "respect" not in u or u["respect"] == 100:
+    if "respect" not in u or u.get("respect") == 100:
         u["respect"] = 80
     if "referrer" not in u:
         u["referrer"] = None
@@ -185,6 +182,8 @@ def partner_profile_text(pid: int):
         print(f"[partner_profile_text ERROR] {e}")
         return "معلومات الشريك غير متوفرة."
 
+# Main.py (الجزء الثاني - معالجات الأوامر والدوال)
+
 # معالجات الأوامر
 @bot.message_handler(commands=['start'])
 def cmd_start(message: Message):
@@ -196,17 +195,14 @@ def cmd_start(message: Message):
     if not u.get("name"):
         print(f"[START] New user registration for uid={uid}")
         
-        # إرسال رسالة ترحيبية أولاً
         welcome_msg = get_welcome_message("START")
         safe_send(uid, welcome_msg)
         
-        # ثم إرسال الستيكر
         try:
             safe_send_sticker(uid, STICKERS.get("welcome_general"))
         except Exception as e:
             print(f"[START] Sticker error: {e}")
 
-        # بدء التسجيل
         try:
             storage.users[uid]["state"] = STATE_REGISTER_NAME
             storage.save_users()
@@ -277,7 +273,6 @@ def on_text(m: Message):
         # معالجة أزرار التنقل والإلغاء
         if txt == "❌ إلغاء البحث":
             if state in [STATE_CHOOSE_TOPIC, STATE_CHOOSE_TARGET_GENDER, STATE_SEARCHING]:
-                # إزالة من قائمة الانتظار إذا كان في البحث
                 try:
                     remove_from_wait(uid)
                 except Exception as e:
@@ -397,7 +392,6 @@ def handle_register_name(uid: int, txt: str):
         storage.users[uid]["state"] = STATE_REGISTER_GENDER
         storage.save_users()
         
-        # إرسال الستيكر أولاً ثم النص (مُصحح)
         try:
             safe_send_sticker(uid, STICKERS.get("after_name"))
         except Exception as e:
@@ -450,7 +444,6 @@ def handle_register_age(uid: int, txt: str):
         
         u = storage.users.get(uid, {})
         
-        # رسالة وستيكر خاص للصغار (أقل من 20) - مُصحح
         if age < 20:
             safe_send(uid, f"✅ تم حفظ العمر: {age}\n🐤 أهلاً بالكتكوت الصغير!")
             try:
@@ -459,7 +452,6 @@ def handle_register_age(uid: int, txt: str):
             except Exception as e:
                 print(f"[REGISTER_AGE] Nabeel sticker error: {e}")
         
-        # رسالة حفظ الملف الشخصي
         profile_msg = PROFILE_SAVED.format(
             name=u.get("name", "غير محدد"),
             gender=u.get("gender", "غير محدد"),
@@ -520,7 +512,6 @@ def handle_search_request(uid: int):
     safe_send(uid, "اختر موضوع النقاش:", reply_markup=topics_menu())
 
 def handle_topic_selection(uid: int, txt: str):
-    # الفئات مع الإيموجي (مُصحح)
     TOPICS_WITH_EMOJI = [
         "رياضة ⚽",
         "سياسة 🗳️", 
@@ -533,24 +524,20 @@ def handle_topic_selection(uid: int, txt: str):
         safe_send(uid, "❌ اختر موضوعًا صالحًا من القائمة.", reply_markup=topics_menu())
         return
     
-    # استخراج اسم الفئة بدون إيموجي للمعالجة الداخلية
-    topic_name = txt.split()[0]  # "رياضة", "سياسة", إلخ
+    topic_name = txt.split()[0]
     
     storage.users[uid]["topic"] = topic_name
     storage.users[uid]["state"] = STATE_CHOOSE_TARGET_GENDER
     storage.save_users()
     
-    # رسالة ترحيب خاصة بكل فئة
     welcome_msg = get_category_welcome(topic_name)
     safe_send(uid, welcome_msg)
     
-    # ستيكرات خاصة بكل فئة (بعد الرسالة)
     if topic_name == "رياضة":
         safe_send_sticker(uid, STICKERS.get("barca_celebration"))
     elif topic_name == "سياسة":
         safe_send_sticker(uid, STICKERS.get("putin_politics"))
     
-    # طلب اختيار الجنس المستهدف
     safe_send(uid, f"الآن اختر جنس الطرف الذي تريده:", reply_markup=target_gender_menu())
 
 def handle_target_gender(uid: int, txt: str):
@@ -593,6 +580,57 @@ def handle_target_gender(uid: int, txt: str):
             storage.users[uid]["state"] = None
             storage.users[uid]["chat_started_at"] = time.time()
             
+            storage.users[pid]["partner"] = uid
+            storage.users[pid]["state"] = None
+            storage.users[pid]["chat_started_at"] = time.time()
+            storage.save_users()
+            
+            ProfileManager.start_history(storage.users[uid])
+            ProfileManager.start_history(storage.users[pid])
+            
+            safe_send(uid, partner_profile_text(pid), reply_markup=ReplyKeyboardRemove())
+            safe_send(pid, partner_profile_text(uid), reply_markup=ReplyKeyboardRemove())
+            safe_send(uid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
+            safe_send(pid, INTRO_PARTNER, reply_markup=main_menu(in_chat=True))
+        except Exception as e:
+            print(f"[MATCH SETUP ERROR] {e}")
+
+    try:
+        start_timeout_watcher(bot)
+    except Exception as e:
+        print(f"[start_timeout_watcher ERROR] {e}")
+
+def handle_leave_request(uid: int):
+    ensure_user_extended(uid)
+    u = storage.users.get(uid, {})
+    started = u.get("chat_started_at") or 0
+    elapsed = time.time() - started
+    leave_delay = getattr(config, "LEAVE_DELAY", 30)
+    if elapsed < leave_delay:
+        safe_send(uid, LEAVE_TOO_SOON.format(remain=int(leave_delay - elapsed)))
+        return
+
+# Main.py (الجزء الثالث والأخير - باقي الدوال والتشغيل)
+
+    storage.users[uid]["state"] = STATE_CONFIRM_LEAVE
+    storage.save_users()
+    safe_send(uid, LEAVE_CONFIRM, reply_markup=yes_no_menu())
+
+def handle_leave_confirm(uid: int, u: dict, txt: str):
+    if txt == "نعم ✅":
+        pid = u.get("partner")
+        if pid:
+            try:
+                ProfileManager.end_session(storage.users[uid], storage.users[pid])
+            except Exception:
+                pass
+                
+            storage.users[uid]["partner"] = None
+            storage.users[uid]["state"] = None
+            storage.users[uid]["chat_started_at"] = None
+            
+            storage.users[pid]["partner"] = None
+            storage.users[pid]["state"] = None
             storage.users[pid]["chat_started_at"] = None
             storage.save_users()
             
@@ -618,7 +656,6 @@ def handle_report_confirm(uid: int, u: dict, txt: str):
     if txt == "نعم ✅":
         pid = u.get("partner")
         try:
-            # فحص الكلمات المسيئة في تاريخ المحادثة - مُصحح
             hist = []
             total_bad_words = 0
             
@@ -626,7 +663,6 @@ def handle_report_confirm(uid: int, u: dict, txt: str):
                 hist = storage.users[pid].get("history", [])
                 print(f"[REPORT] Checking {len(hist)} messages for bad words")
                 
-                # عدّ الكلمات المسيئة في كل رسالة
                 for message in hist:
                     try:
                         bad_words = contains_bad_word(message)
@@ -638,7 +674,6 @@ def handle_report_confirm(uid: int, u: dict, txt: str):
             
             print(f"[REPORT] Total bad words found: {total_bad_words}")
             
-            # خصم 5 نقاط لكل كلمة مسيئة - مُصحح
             penalty = total_bad_words * 5
             
             if pid and storage.users.get(pid) and penalty > 0:
@@ -648,19 +683,16 @@ def handle_report_confirm(uid: int, u: dict, txt: str):
                 
                 print(f"[REPORT] Penalty: {penalty}, Old respect: {current_respect}, New respect: {new_respect}")
                 
-                # تحقق إذا كان يحتاج حظر أو كتم
                 if new_respect <= 25:
                     storage.users[pid]["banned_full"] = True
                 elif new_respect <= 40:
-                    storage.users[pid]["muted_until"] = int(time.time() + 3600)  # كتم لساعة
+                    storage.users[pid]["muted_until"] = int(time.time() + 3600)
                 
                 storage.save_users()
                 
-                # إخبار المبلغ
                 safe_send(uid, REPORT_OK)
                 safe_send(uid, f"✅ تم العثور على {total_bad_words} كلمة مسيئة\n⬇️ تم خصم {penalty} نقطة احترام من الشريك ({total_bad_words} × 5)\n⭐ احترامه الآن: {new_respect}")
                 
-                # تنبيه المسيء
                 if new_respect <= 25:
                     safe_send(pid, "🚫 تم حظرك نهائياً بسبب تكرار المخالفات!")
                 elif new_respect <= 40:
@@ -680,7 +712,6 @@ def handle_report_confirm(uid: int, u: dict, txt: str):
             print(traceback.format_exc())
             safe_send(uid, REPORT_OK)
             
-        # العودة للقائمة الرئيسية مع إمكانية المغادرة
         storage.users[uid]["state"] = None
         storage.save_users()
         safe_send(uid, "تم تسجيل البلاغ. هل تريد مغادرة الدردشة؟", 
@@ -698,13 +729,11 @@ def handle_chat_message(uid: int, txt: str, u: dict):
     if txt in ("🚪 مغادرة الدردشة", "🚨 إبلاغ", "تواصل مع الدعم"):
         return
 
-    # تحقق الحظر الجزئي
     if u.get("muted_until") and time.time() < int(u.get("muted_until")):
         left = int(int(u.get("muted_until")) - time.time())
         safe_send(uid, MUTED.format(left=left))
         return
 
-    # معالجة الكلمات المسيئة (التشفير + التسجيل للبلاغات)
     try:
         bad_words = contains_bad_word(txt)
         if bad_words:
@@ -715,19 +744,16 @@ def handle_chat_message(uid: int, txt: str, u: dict):
     except Exception:
         txt_to_send = txt
 
-    # تطبيق نظام الاحترام
     try:
         apply_respect(uid, txt_to_send)
     except Exception:
         pass
 
-    # حفظ الرسالة الأصلية في التاريخ للبلاغات المستقبلية
     try:
-        append_history(uid, txt)  # حفظ النص الأصلي للبلاغات
+        append_history(uid, txt)
     except Exception:
         pass
 
-    # إرسال للشريك
     pid = u.get("partner")
     if not pid or pid not in storage.users:
         storage.users[uid]["partner"] = None
@@ -783,5 +809,4 @@ if __name__ == "__main__":
         print(f"[WEBHOOK ERROR] {e}")
     port = int(os.environ.get("PORT", getattr(config, "PORT", 5000)))
     print(f"[RUN] Webhook listening on port {port}…")
-    app.run(host="0.0.0.0", port=port)d]["partner"] = uid
-            
+    app.run(host="0.0.0.0", port=port)
